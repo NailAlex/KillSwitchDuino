@@ -5,6 +5,6 @@ KillSwitchDuino EEPROM memory config structure:
 0001-0002:  2 bytes (unsigned int) – LowerLevel PPM value (default=1000ms), writing - low-high byte
 0003-0004:  2 bytes (unsigned int) – UpperLevel PPM value (default=2000ms), writing - low-high byte
 0005-0006:  2 bytes (unsigned int) – Switching level PPM value (default=1500ms), writing - low-high byte
-0007:  1 byte (byte) – No RX signal Engine OFF parameter. If =3 then Engine going down if loas RX signal, if =5 then use last value before lost RX (default - 5)
+0007:  1 byte (byte) – No RX signal Engine OFF parameter. If =3 then Engine going down if lost RX signal, if =5 then use last value before lost RX (default - 5)
 0008: 1 byte (byte) – Battery chemistry type. If =17 then - LeFePO4, if =21 then - LiPolymer (default - LiFePO4)
 0035: 1 byte (byte) - tail header. If equal 35 (and start header equal 35) - use config from EEPROM, else use default values

@@ -88,6 +88,7 @@ uint8_t SystemMode = SYSTEM_NORMAL; //SYSTEM_NORMAL - Main operate mode
                                     //SYSTEM_MENU_2_BTYPE - Battery Type Select Menu page
                                     //SYSTEM_MENU_3_RX - NoRX EngineOff Select Menu page
 bool SystemServiceMode = false;     //enable embedded servotester for PPM generating(SYSTEM_SERVICE_PIN must be HIGH)
+uint8_t MenuPhase = 1;              //Menu phase for navigating
 
 //SoftTimers vars
 Timer m_timer;

@@ -24,9 +24,9 @@ DESCRIPTION
 All Menu Item selection use switching from Upper to Lower position!
 
 - Calibration Procedure
-After starting the calibration procedure, after playing the melody, set the switch to the upper position. 
+After starting the calibration procedure, after playing the melody, set the switch to the Upper position. 
 Do not touch the toggle switch during reading (audible pause). 
-After playing music for the second time, switch the toggle switch in the down position. 
+After playing music for the second time, switch the toggle switch in the Lower position. 
 Do not touch the toggle switch during reading (audible pause).
 
 All steps for Calibration Procedure also translate to Serial Port.
@@ -42,7 +42,7 @@ Just switch to Lower Position on current item(after beeps)!
 After select you stay in current Submenu!
 
 - Reset configuration to Defaults
-After select this item, all parameters(Upper,Lower,Switch PPM levels, battery chemistry type, No RX signal Engine 
+After select this item, all parameters(Upper, Lower, Switch PPM levels, battery chemistry type, No RX signal Engine 
 Cutoff will be reset to system defaults you automatically going to the Main Menu.
 
 - Exit to Normal Mode
@@ -55,7 +55,7 @@ status or the current submenu. The number after "M_Item" indicate item number in
 
 
 Any number of sub-menu items and branches can be added to the menu. Use the template menu item (M1-M5) to 
-create your menu, add SystemState Number to #define and to main loop to switch-case. 
+create your menu, add SystemState Number in #define section and to main loop to switch-case. 
 
 The minimum number of items in the submenu - 2(target and exit to up menu).
 

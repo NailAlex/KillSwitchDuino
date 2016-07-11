@@ -1211,7 +1211,6 @@ void loop() {
       if (CalibratingStageCounter==2 || CalibratingStageCounter==4 ) 
         {
           for (CalibratingCounter=0; CalibratingCounter <= 255; CalibratingCounter++){
-            MainStateHandler();
            CalibratingInput(CalibratingStageCounter); 
           }
         } else {CalibratingInput(CalibratingStageCounter);}

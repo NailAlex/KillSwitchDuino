@@ -1,0 +1,59 @@
+Enter to Menu Mode by switching 3 times to Lower Position within 5 seconds from start
+
+MENU STRUCTURE
+
+MAIN MENU
+  - Calibration Submenu  (1 beep)
+      -- Start Calibration procedure and exit to Main Menu (1 beep)
+      -- Exit to Main menu (2 beeps)
+  - Battery chemistry selection Submenu  (2 beeps)
+      -- LiFePO4 battery type (1 beep)
+      -- LiPolymer battery type (2 beeps)
+      -- Exit to Main menu (3 beeps)
+  - No RX signal Engine Cutoff Submenu (3 beeps)
+      -- ON (1 beep)
+      -- OFF (2 beeps)
+      -- Exit to Main menu (3 beeps)
+  - Reset configuration to Defaults Submenu (4 beeps)
+      -- Reset Configuration and exit to Main Menu (1 beep)
+      -- Exit to Main menu (2 beeps)
+  - Exit to Normal Mode (5 beeps)
+
+
+DESCRIPTION
+All Menu Item selection use switching from Upper to Lower position!
+
+- Calibration Procedure
+After starting the calibration procedure, after playing the melody, set the switch to the upper position. Do not touch the toggle switch during 
+reading (audible pause). After playing music for the second time, switch the toggle switch in the down position. Do not touch the toggle 
+switch during reading (audible pause).
+All steps for Calibration Procedure also translate to Serial Port.
+
+After the calibration procedure, you automatically going to the Main Menu.
+
+All read values are applied to the levels of the variables in the current session.
+
+- Calibration Procedure
+- No RX signal Engine Cutoff
+Just switch to Lower Position on current item(after beeps)!
+
+After select you stay in current Submenu!
+
+- Reset configuration to Defaults
+After select this item, all parameters(Upper,Lower,Switch PPM levels, battery chemistry type, No RX signal Engine Cutoff will be reset to system defaults 
+you automatically going to the Main Menu.
+
+- Exit to Normal Mode
+After select this item, all parameters save to EEPROM and KillSwitch going to Normal Mode.
+
+ADDITIONAL
+
+Menu navigation is also displayed in the system log in the Serial port. The first word indicates the current status or the current submenu. The number after 
+"M_Item" indicate item number in this menu/submenu.
+
+
+Any number of sub-menu items and branches can be added to the menu. Use the template menu item (M1-M5) to create your menu, add SystemState Number to #define 
+and to main loop to switch-case. 
+
+The minimum number of items in the submenu - 2(target and exit to up menu).
+

@@ -40,6 +40,7 @@
 #define DEF_KILLSWITCH_LEVEL 1500        //Default switching level in ms (1000<SwitchLevel<2000)
 #define DEF_LOWER_PPM_LEVEL 1000
 #define DEF_UPPER_PPM_LEVEL 2000
+#define SYSTEM_SERVICE_PIN 12
 
 //System States
 #define SYSTEM_NORMAL 0
@@ -49,13 +50,24 @@
 #define SYSTEM_MENU_1_CAL 22
 #define SYSTEM_MENU_2_BTYPE 23
 #define SYSTEM_MENU_3_RX 24
-#define SYSTEM_SERVICE_PIN 12
+#define SYSTEM_MENU_4_DEFAULTS 25
+#define SYSTEM_CALIBRATING 40
 
+//Menus 
+#define MENU_INITIAL_PERIOD 5000           //Time period from SYSTEM_FIRST_START for enter in Menu Mode
+#define MENU_CHOICE_PERIOD 3000            //Time period for user choice
 
 //BEEPER
 #define BEEPER_PIN 11
 #define BEEPER_ACT_PERIOD 2000  //Time limits within activate Beeper if >=3 time EngineStop pushed
 #define BEEPER_FREQ 2300        //For feature use
+#define SOUND_MM_INTRO 1
+#define SOUND_MM_OUTRO 2
+#define SOUND_M1_INTRO 3
+#define SOUND_M2_INTRO 4
+#define SOUND_M3_INTRO 5
+#define SOUND_M4_INTRO 6
+
 
 //Battery Section
 //all battery types default as 2S
@@ -88,22 +100,38 @@ uint8_t SystemMode = SYSTEM_NORMAL; //SYSTEM_NORMAL - Main operate mode
                                     //SYSTEM_MENU_2_BTYPE - Battery Type Select Menu page
                                     //SYSTEM_MENU_3_RX - NoRX EngineOff Select Menu page
 bool SystemServiceMode = false;     //enable embedded servotester for PPM generating(SYSTEM_SERVICE_PIN must be HIGH)
-uint8_t MenuPhase = 1;              //Menu phase for navigating
+
+
+//Menus variables
+bool MenuMode = false;     
+bool MenuIntroPlayed = false;         
+uint8_t MenuItem = 0;              //Menu Item counter. if =0 then just entering to menu and need play intro sound
+                                   //Proposed to the selection menu Item.
+                                   //1 (1 short beep) - Go to Calibration Menu page
+                                   //2 (2 short beeps) - Go to Battery Type Select Menu page
+                                   //3 (3 short beeps) - Go to NoRX EngineOff Select Menu page
+                                   //4 (4 short beeps) - Exit to Menu Mode to normal
+
+unsigned long MenuInitialTime = 0; //Start Time(in ms) after SYSTEM_FIRST_START procedure
+unsigned long MenuItemTime = 0;    //Current Item start Time(in ms)
+bool MenuItemSelected = false;
+
+
 
 //SoftTimers vars
 Timer m_timer;
   
 //Voltage vars
-uint8_t  MainBattType = BATT_LIFE;
+byte MainBattType = BATT_LIFE;
 float MainBattVoltage = 0.0;
 float MainBattR1 = 14966.0;                    //Volt devider upper leg resistor (+Vin -> read point) 
 float MainBattR2 = 9856.0;                     //Volt devider lower leg resistor (read point -> GND) 
 float V_REF = 5.05;                            //accurate value of the voltage from system linear regulator
 float MAIN_BATT_VADD = 0.03;                   //Volt correction factor
 float MainBattVoltageSum = 0;                  //Volt sum for calc average
-uint8_t MainBattVoltageCount = 0;                  //Volt reading count for calc average
+byte MainBattVoltageCount = 0;                  //Volt reading count for calc average
 float MainBattVoltageAverage = 0;              //Average voltage within reading period
-uint8_t MainBattVoltageAveragetime = 7;        //1 time per 2 seconds period
+byte MainBattVoltageAveragetime = 7;           //1 time per 2 seconds period
 float MainBattLowVoltageLevel1 = 0;            //Current Level1 for blocking ignition and Blue MainLED blinking
 float MainBattLowVoltageLevel2 = 0;            //Current Level2 for all blocking ignition and activate Imperial March
   
@@ -112,9 +140,14 @@ unsigned int ServoOutMS = 0;                   //Intergated ServoTester output P
 unsigned int ServoInValue = 0;                 //Intergated ServoTester input PPM signal value from potentiometer
 Servo myservo;        
 unsigned int ServoLastOutMS = 0;               //stopflag for one time switching
-unsigned int PPMLowerLevel = DEF_LOWER_PPM_LEVEL;
-unsigned int PPMUpperLevel = DEF_UPPER_PPM_LEVEL;
-unsigned int PPMSwitchLevel = DEF_KILLSWITCH_LEVEL;
+int PPMLowerLevel = DEF_LOWER_PPM_LEVEL;
+int PPMUpperLevel = DEF_UPPER_PPM_LEVEL;
+int PPMSwitchLevel = DEF_KILLSWITCH_LEVEL;
+int CalibrationUpperLevel = 0;
+int CalibrationLowerLevel = 0;
+int CalibrationSwitchLevel = 0;
+int CalibratingStageCounter = 1;
+int CalibratingCounter = 0;
 
 //Main Switch vars
 volatile unsigned long KillSWTime = 0;  //Input Switch microsec length
@@ -186,7 +219,6 @@ int counter = 0;
 void setup() {
   // put your setup code here, to run once:
  Serial.begin(38400);
- Serial.println("Starting readings");
  Wire.begin();
  
  //Setup the LED pin as an output:
@@ -224,8 +256,14 @@ void FirstTimeRunInit(){
    MainBattVoltageAveragetime=7;
    MainBattVoltageAverage=MainBattVoltage;
 
-  // ResetEEPROMConfig();
-   if (!ReadEEPROMConfig()) {WriteEEPROMConfig();}
+   //ResetEEPROMConfig();
+   if (!ReadEEPROMConfig()) {
+        Serial.println("EEPROM Config clean. Use DEFAULTS!");
+        WriteEEPROMConfig();} else
+        {Serial.println("Use EEPROM Config. Set parameters");}
+
+        RenderCurrentConfig();
+ 
 
     if (KillSWTime >= PPMSwitchLevel)
     {
@@ -236,6 +274,14 @@ void FirstTimeRunInit(){
      //Switch in Upper position
      SwitchPOS=true;
      SwitchPOSUp=false;}
+
+  
+  
+  Serial.println("Starting readings");
+
+  //initial menu time reading
+  MenuInitialTime = millis();
+  
 
 }
 
@@ -257,7 +303,7 @@ float vout=0;
 
 void readServoTester(){
  ServoInValue=analogRead(SERVO_TEST_INPIN);
- ServoOutMS = map(ServoInValue,0,1023,1000,2000);
+ ServoOutMS = map(ServoInValue,0,1023,PPMLowerLevel,PPMUpperLevel);
 }
 
 //-----------------------------------------------------------------
@@ -419,13 +465,38 @@ bool ReadEEPROMConfig(){
    PPMUpperLevel = EEPROMReadInt(3);
    PPMSwitchLevel = EEPROMReadInt(5);
    b=EEPROM.read(7);
-   if (b==3) {UseNoRXEngineSTOP=true;} else if (b==5) {UseNoRXEngineSTOP=false;}
+   if (b==3) {UseNoRXEngineSTOP=true;} else {UseNoRXEngineSTOP=false;}
    MainBattType=EEPROM.read(8);
    newc=false;
   }
 
-    
-    switch (MainBattType) {
+   SetupBatteryLevels(); 
+
+ return newc;
+}
+
+
+//-----------------------------------------------------------------
+
+void RenderCurrentConfig(){
+          switch (MainBattType) {
+          case BATT_LIFE: 
+            Serial.print("Battery type: LiFE");
+            break;
+           case BATT_LIPO: 
+            Serial.print("Battery type: LiPO"); 
+            break;
+            default:
+            Serial.print("Battery type: Unk");
+          }  
+         Serial.print(" | PPM levels Up/Lo/Sw: ");Serial.print(PPMUpperLevel);Serial.print("/");Serial.print(PPMLowerLevel);Serial.print("/");Serial.print(PPMSwitchLevel);Serial.print(" | Use NoRX Eng STOP: ");Serial.println(UseNoRXEngineSTOP);
+}
+
+//-----------------------------------------------------------------
+
+
+void SetupBatteryLevels(){
+      switch (MainBattType) {
       case BATT_LIFE:
         MainBattLowVoltageLevel1 = BATT_LIFE_LEVEL1;
         MainBattLowVoltageLevel2 = BATT_LIFE_LEVEL2;
@@ -435,11 +506,7 @@ bool ReadEEPROMConfig(){
         MainBattLowVoltageLevel2 = BATT_LIPO_LEVEL2;
       break;
     }
- 
- 
- return newc;
 }
-
 
 //-----------------------------------------------------------------
 
@@ -447,8 +514,8 @@ void WriteEEPROMConfig(){
  //write header1
   EEPROM.write(0,35);
   EEPROMWriteInt(1,PPMLowerLevel);
-  EEPROMWriteInt(1,PPMUpperLevel);
-  EEPROMWriteInt(1,PPMSwitchLevel);
+  EEPROMWriteInt(3,PPMUpperLevel);
+  EEPROMWriteInt(5,PPMSwitchLevel);
   if (UseNoRXEngineSTOP) {EEPROM.write(7, 3);} else {EEPROM.write(7, 5);}
   EEPROM.write(8,MainBattType);
   //write header2
@@ -479,7 +546,78 @@ void EEPROMWriteInt(int p_address, int p_value)
 
 
 //-----------------------------------------------------------------
+
+void PlayMenuSound(const byte stype){
+  //Play enter to menu sound
+  
+ switch (stype) {
+   case 1:   //Main Menu Intro
+     tone(BEEPER_PIN,300,150);
+     delay(150);
+     tone(BEEPER_PIN,800,150);
+     delay(150);
+     tone(BEEPER_PIN,1300,150);
+     delay(150);
+     tone(BEEPER_PIN,1800,150);
+     delay(150);
+     tone(BEEPER_PIN,2300,150);
+     delay(150);    
+     break;    
+   case 2:  //Main Menu Outro
+     tone(BEEPER_PIN,2300,150);
+     delay(150);
+     tone(BEEPER_PIN,1800,150);
+     delay(150);
+     tone(BEEPER_PIN,1300,150);
+     delay(150);
+     tone(BEEPER_PIN,800,150);
+     delay(150);
+     tone(BEEPER_PIN,300,150);
+     delay(150);    
+    break;
+   case 3:  //Calibrating SubMenu Intro
+     tone(BEEPER_PIN,2300,200);
+     delay(200);
+     tone(BEEPER_PIN,200,200);
+     delay(200);
+     tone(BEEPER_PIN,2300,200);
+     delay(200);
+    break;
+   case 4:  //Battery Chemistry SubMenu Intro
+     tone(BEEPER_PIN,2300,500);
+     delay(500);
+     tone(BEEPER_PIN,200,150);
+     delay(150);
+    break;    
+   case 5:  //NoRX Engine Off SubMenu Intro
+     tone(BEEPER_PIN,200,500);
+     delay(500);
+     tone(BEEPER_PIN,2300,150);
+     delay(150);
+    break;    
+   case 6:  //Setup to DEFAULTS SubMenu Intro
+     tone(BEEPER_PIN,1000,500);
+     delay(500);
+     tone(BEEPER_PIN,1000,150);
+     delay(150);
+    break;    
+ }
+  
+  
+
+}
+
 //-----------------------------------------------------------------
+
+void PlayItemSound(const byte count){
+ byte i;
+  for (int i=0; i <=count-1; i++){
+   tone(BEEPER_PIN,2300,100);
+   delay(300);
+  }  
+}
+
+
 //-----------------------------------------------------------------
 //-----------------------------------------------------------------
 // ================================================================
@@ -487,8 +625,6 @@ void EEPROMWriteInt(int p_address, int p_value)
 // ================================================================
 
 void KillSWHandler(){
-//reset packets counter
-  if (KillSWCounter >= 50) { KillSWCounter=1;}  
 
 //reading PPM signal from channel
      if (digitalRead(KILLSWITCH_INPIN) == HIGH) 
@@ -519,6 +655,9 @@ void KillSWHandler(){
       SwitchPOSUp=false;
       }
    }
+//reset packets counter
+  if (KillSWCounter >= 50) { KillSWCounter=1;}  
+
 }
 
 //-----------------------------------------------------------------
@@ -527,8 +666,7 @@ void KillSWHandler(){
 // ================================================================
 
 void MainStateHandler(){
-
- if (digitalRead(SYSTEM_SERVICE_PIN)==HIGH) {SystemServiceMode=true;} else {SystemServiceMode=false;}
+if (digitalRead(SYSTEM_SERVICE_PIN)==HIGH) {SystemServiceMode=true;} else {SystemServiceMode=false;}
 
  //Engine STOP handling
  //in Normal operating mode Engine stop signal equal Switch position
@@ -564,11 +702,17 @@ void MainStateHandler(){
    { 
     switch (KillSWPressCounter) {
     case 3: 
+     if (millis() - MenuInitialTime <= MENU_INITIAL_PERIOD){
+     //Switched 3 times within Initial period - GO TO Menu Mode!
+       MenuMode=true;
+       SystemMode=SYSTEM_MENU_M; 
+     } else {
      BeeperActive=!BeeperActive;
      LED13Active=BeeperActive;
      KillSWPressCounter=0;
      KillSWPressCounterChange=false;
-     KillSWPressLaststime=millis();
+     KillSWPressLaststime=millis();}
+     
     break; 
     case 1: 
      //start time for BEEPER_ACT_PERIOD period
@@ -682,10 +826,18 @@ void MainTimerHandler(){
    case SYSTEM_MENU_3_RX: 
     Serial.print("MENU_3 "); 
     break;
-}  
-  
-  Serial.print("KSW : ");Serial.print(!EngineSTOP);Serial.print(" / ");Serial.print(MaxKillSWCounter);Serial.print(" / ");Serial.print(KillSWPressCounter);  
+   case SYSTEM_MENU_4_DEFAULTS: 
+    Serial.print("MENU_4 "); 
+    break;
+  }  
+  //KillSwitch states render
+  Serial.print("KSW : ");Serial.print(!EngineSTOP);Serial.print(" / ");Serial.print(MaxKillSWCounter);Serial.print(" / ");Serial.print(KillSWPressCounter); 
+  //Menu states render
+  Serial.print(" M_Item : ");
+  Serial.print(MenuItem); 
+  //Service states redner
   Serial.print(" | Service/NoRX/LowBatt/Beeper : ");Serial.print(SystemServiceMode);Serial.print(" / ");Serial.print(StatusNoRX);Serial.print(" / ");Serial.print(StatusLowBatt);Serial.print(" / ");Serial.print(BeeperActive);
+  //Battery status render
   Serial.print(" | VBatt/Avg/Type: ");Serial.print(MainBattVoltage);Serial.print(" / ");Serial.print(MainBattVoltageAverage);Serial.print(" / ");
   switch (MainBattType) {
    case BATT_LIFE: 
@@ -697,8 +849,8 @@ void MainTimerHandler(){
     default:
     Serial.print("Unk");
   }  
-  
-  Serial.print(" | KSW time: ");Serial.print(ServoOutMS);Serial.print("/");Serial.println(KillSWTime);
+  //RX input render
+  Serial.print(" | KSW time Gen/Read/Sw: ");Serial.print(ServoOutMS);Serial.print("/");Serial.print(KillSWTime);Serial.print("/");Serial.println(PPMSwitchLevel);
   Rendertime=3;
   } else Rendertime--;
 
@@ -740,47 +892,285 @@ void MainTimerHandler(){
   MaxKillSWCounter=0;
   KillSWCounterTime=3;
  } else KillSWCounterTime--;
-
-
-  
 }
 
 //-----------------------------------------------------------------
 
+bool MenuInputHandler(){
+ bool s;
+  s=false;
+   if (millis() - MenuItemTime <= MENU_CHOICE_PERIOD && KillSWPressCounter >=1 && KillSWPressCounterChange) 
+   { //if Selected(switched down)
+    //MenuItemTime=millis();
+    KillSWPressCounterChange=false;
+    KillSWPressCounter=0;
+    tone(BEEPER_PIN,2300,30);
+    s=true;
+   } 
+  if (millis() - MenuItemTime > MENU_CHOICE_PERIOD) {
+    KillSWPressCounter=0;
+    KillSWPressCounterChange=false;
+  //  MenuItemTime=millis();
+  }
+ return s;
+}
+
+
+//-----------------------------------------------------------------
+
+
 void MenuMHandler (){
-
-
-
-  
+if (MenuItem==0) {PlayMenuSound(SOUND_MM_INTRO); MenuIntroPlayed=false;MenuItem=1; delay(2000);} 
+else{
+    MenuItemSelected=MenuInputHandler();
+    //Play Menu Item selection sound
+    if (!MenuIntroPlayed) {PlayItemSound(MenuItem); MenuIntroPlayed=true;MenuItemTime=millis();}
+ switch (MenuItem) {
+   case 1:   //Go To Calibrating RX signal 
+    if (MenuItemSelected) {SystemMode=SYSTEM_MENU_1_CAL;MenuItem=0;}
+    break;    
+   case 2:   //Go To Battery chemistry type select 
+    if (MenuItemSelected) {SystemMode=SYSTEM_MENU_2_BTYPE;MenuItem=0;}
+    break;
+   case 3:   //Go To NoRX engine off select
+    if (MenuItemSelected) {SystemMode=SYSTEM_MENU_3_RX;MenuItem=0;}
+    break;
+   case 4:   //Go To setup to DEFAULTS procedure
+    if (MenuItemSelected) {SystemMode=SYSTEM_MENU_4_DEFAULTS;MenuItem=0;}
+    break;
+   case 5:  //Exit to Normal Mode
+    if (MenuItemSelected) {
+      PlayMenuSound(SOUND_MM_OUTRO);
+      MenuItem=0;
+       Serial.println("Save configuration to EEPROM");
+      RenderCurrentConfig();
+      WriteEEPROMConfig();
+      SystemMode=SYSTEM_NORMAL;}
+    break;    
+ }
+  //Rotate Menu items choice
+  if (millis() - MenuItemTime > MENU_CHOICE_PERIOD) {
+  if (MenuItem==5) {MenuItem=1;} else {MenuItem++;} 
+  MenuIntroPlayed=false;}
+    }
 }
 
 //-----------------------------------------------------------------
 
 void Menu1Handler (){
+//Calibrating Procedure PreMenu
+//1 beep - Start Calibration procedure
+//2 beeps - Exit to Main Menu
 
+if (MenuItem==0) {PlayMenuSound(SOUND_M1_INTRO); MenuIntroPlayed=false;MenuItem=1; delay(2000);MenuItemTime=millis(); } 
+   MenuItemSelected=MenuInputHandler();
 
-
-  
+  //Rotate Menu items choice
+  if (millis() - MenuItemTime > MENU_CHOICE_PERIOD) {
+  if (MenuItem==2) {MenuItem=1;} else {MenuItem++;} 
+  MenuIntroPlayed=false; }
+    
+    //Play Menu Item selection sound
+    if (!MenuIntroPlayed) {PlayItemSound(MenuItem); MenuIntroPlayed=true;MenuItemTime=millis();}
+ switch (MenuItem) {
+   case 1:   //Start RX Calibration procedure
+    if (MenuItemSelected) {
+        CalibratingStageCounter=1; 
+        SystemMode=SYSTEM_CALIBRATING;}
+    break;    
+   case 2:  //Exit to Main Menu
+    if (MenuItemSelected) {MenuItem=0;SystemMode=SYSTEM_MENU_M;}
+    break;    
+ }
+ 
 }
 
 //-----------------------------------------------------------------
 
 void Menu2Handler (){
+//Select battery chemistry SubMenu
+//1 beep - LiFe battery
+//2 beep - LiPolymer battery
+//3 beeps - Exit to Main Menu
+if (MenuItem==0) {PlayMenuSound(SOUND_M2_INTRO); MenuIntroPlayed=false;MenuItem=1; delay(2000);MenuItemTime=millis();} 
+   MenuItemSelected=MenuInputHandler();
 
-
-
-  
+  //Rotate Menu items choice
+  if (millis() - MenuItemTime > MENU_CHOICE_PERIOD) {
+  if (MenuItem==3) {MenuItem=1;} else {MenuItem++;} 
+  MenuIntroPlayed=false; } 
+    
+    //Play Menu Item selection sound
+    if (!MenuIntroPlayed) {PlayItemSound(MenuItem); MenuIntroPlayed=true;MenuItemTime=millis();MenuItemTime=millis();}
+ switch (MenuItem) {
+   case 1:   //Setup to LiFePO4
+    if (MenuItemSelected) {
+         MainBattType=BATT_LIFE;
+         SetupBatteryLevels(); 
+         MenuItem=0;
+         MenuIntroPlayed=false;
+      }
+    break;    
+   case 2:  //Setup to LiPolymer
+    if (MenuItemSelected) {
+         MainBattType=BATT_LIPO;
+         SetupBatteryLevels(); 
+         MenuItem=0;
+         MenuIntroPlayed=false;
+         }
+    break;    
+   case 3:  //Exit to Main Menu
+    if (MenuItemSelected) {MenuItem=0;SystemMode=SYSTEM_MENU_M;}
+   break;    
+ }
 }
 
 //-----------------------------------------------------------------
 
 void Menu3Handler (){
+//Select battery chemistry SubMenu
+//1 beep - ON
+//2 beep - OFF
+//3 beeps - Exit to Main Menu
 
 
+if (MenuItem==0) {PlayMenuSound(SOUND_M2_INTRO); MenuIntroPlayed=false;MenuItem=1; delay(2000);MenuItemTime=millis();} 
 
-  
+  //Rotate Menu items choice
+  if (millis() - MenuItemTime > MENU_CHOICE_PERIOD) {
+  if (MenuItem==3) {MenuItem=1;} else {MenuItem++;} 
+  MenuIntroPlayed=false;} 
+ 
+   
+   MenuItemSelected=MenuInputHandler();
+    //Play Menu Item selection sound
+    if (!MenuIntroPlayed) {PlayItemSound(MenuItem); MenuIntroPlayed=true;MenuItemTime=millis();MenuItemTime=millis();}
+ switch (MenuItem) {
+   case 1:   //Setup to ON
+    if (MenuItemSelected) {
+         UseNoRXEngineSTOP=true;
+         MenuItem=0;
+         MenuIntroPlayed=false;
+      }
+    break;    
+   case 2:  //Setup to OFF
+    if (MenuItemSelected) {
+         UseNoRXEngineSTOP=false;
+         MenuItem=0;
+         MenuIntroPlayed=false;
+       }
+    break;    
+   case 3:  //Exit to Main Menu
+    if (MenuItemSelected) {MenuItem=0;SystemMode=SYSTEM_MENU_M;}
+   break;    
+ }
 }
 
+//-----------------------------------------------------------------
+
+void Menu4Handler (){
+//Reset Configuration to DEFAULTS
+//1 beep - Reset to defaults and exit to main menu
+//2 beeps - Exit to Main Menu without changing
+
+if (MenuItem==0) {PlayMenuSound(SOUND_M4_INTRO); MenuIntroPlayed=false;MenuItem=1; delay(2000);MenuItemTime=millis();} 
+   MenuItemSelected=MenuInputHandler();
+
+  //Rotate Menu items choice
+  if (millis() - MenuItemTime > MENU_CHOICE_PERIOD) {
+  if (MenuItem==2) {MenuItem=1;} else {MenuItem++;} 
+  MenuIntroPlayed=false; }
+    
+    //Play Menu Item selection sound
+    if (!MenuIntroPlayed) {PlayItemSound(MenuItem); MenuIntroPlayed=true;MenuItemTime=millis();}
+ switch (MenuItem) {
+   case 1:   //Reset Configuration to defaults and Go To Main Menu
+    if (MenuItemSelected) {
+       PPMLowerLevel = DEF_LOWER_PPM_LEVEL;
+       PPMUpperLevel = DEF_UPPER_PPM_LEVEL; 
+       PPMSwitchLevel = DEF_KILLSWITCH_LEVEL;
+       UseNoRXEngineSTOP = false;
+       MainBattType = BATT_LIFE;
+       Serial.println("Reset configuration to DEFAULTS");
+       RenderCurrentConfig();
+       MenuItem=0;
+       SystemMode=SYSTEM_MENU_M;
+      }
+    break;    
+   case 2:  //Exit to Main Menu
+    if (MenuItemSelected) {MenuItem=0;SystemMode=SYSTEM_MENU_M;}
+    break;    
+ }
+ 
+}
+
+
+//-----------------------------------------------------------------
+
+void CalibratingInput (const byte stage){
+  int i;
+ switch (stage) {
+   case 1:   //Stage1 - play UpperPosition sound
+    Serial.println("Move switch to Upper position"); 
+     for (i=0; i <= 124; i++){
+        analogWrite(BEEPER_PIN, i*24);
+        delay(24);
+     }
+     analogWrite(BEEPER_PIN, 0);
+     delay(3000);
+     delayMicroseconds(1000); 
+   break;    
+   case 2:   //Stage2 - reading UpperPosition data
+     CalibrationUpperLevel=KillSWTime;
+     delayMicroseconds(1000); 
+     CalibrationUpperLevel=KillSWTime;
+     delayMicroseconds(1000); 
+     CalibrationUpperLevel=KillSWTime;
+     delayMicroseconds(1000); 
+     CalibrationUpperLevel=KillSWTime;
+     delayMicroseconds(1000); 
+     CalibrationUpperLevel=KillSWTime;
+     delayMicroseconds(1000); 
+   break;    
+   case 3:   //Stage3 - play LowerPosition sound
+     Serial.println("Move switch to Lower position"); 
+     for (i=0; i <= 124; i++){
+        analogWrite(BEEPER_PIN, i*24);
+        delay(24);
+     }
+     analogWrite(BEEPER_PIN, 0);
+     delay(3000);
+     delayMicroseconds(1000); 
+   break;    
+   case 4:   //Stage4 - reading LowerPosition data
+    CalibrationLowerLevel=KillSWTime;
+     delayMicroseconds(1000); 
+    CalibrationLowerLevel=KillSWTime;
+     delayMicroseconds(1000); 
+    CalibrationLowerLevel=KillSWTime;
+     delayMicroseconds(1000); 
+    CalibrationLowerLevel=KillSWTime;
+     delayMicroseconds(1000); 
+    CalibrationLowerLevel=KillSWTime;
+     delayMicroseconds(1000); 
+   break;    
+   case 5:   //Stage2 - Calculate levels
+    CalibrationSwitchLevel = CalibrationLowerLevel + abs((CalibrationUpperLevel - CalibrationLowerLevel) / 2);
+    Serial.print("Read value for UpperLevel: ");Serial.println(CalibrationUpperLevel);
+    Serial.print("Read value for LowerLevel: ");Serial.println(CalibrationLowerLevel);
+    Serial.print("SwitchLevel is ");Serial.println(CalibrationSwitchLevel);
+
+       PPMLowerLevel = CalibrationLowerLevel;
+       PPMUpperLevel = CalibrationUpperLevel; 
+       PPMSwitchLevel = CalibrationSwitchLevel;
+    
+    SystemMode=SYSTEM_MENU_M;
+    MenuItem=0;
+   break;    
+ }
+}
+
+//-----------------------------------------------------------------
 //-----------------------------------------------------------------
 
 // ================================================================
@@ -812,7 +1202,20 @@ void loop() {
       Menu2Handler();
      break;    
      case SYSTEM_MENU_3_RX: 
-      Menu2Handler();
+      Menu3Handler();
+     break;    
+     case SYSTEM_MENU_4_DEFAULTS:
+      Menu4Handler();
+     break;
+     case SYSTEM_CALIBRATING: 
+      if (CalibratingStageCounter==2 || CalibratingStageCounter==4 ) 
+        {
+          for (CalibratingCounter=0; CalibratingCounter <= 255; CalibratingCounter++){
+            MainStateHandler();
+           CalibratingInput(CalibratingStageCounter); 
+          }
+        } else {CalibratingInput(CalibratingStageCounter);}
+      CalibratingStageCounter++;
      break;    
     }
 }

@@ -13,6 +13,8 @@
  * a) RX signal calibrating procedure
  * b) Engine stopping if no RX signal
  * c) RX battery chemistry type select(LiPO, LiFE) for correct battery protecting
+ * d) reset to Defaults
+ * e) exit to normal mode
  */
 
 

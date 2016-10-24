@@ -54,4 +54,4 @@ Embedded interactive menu for RX calibrating, battery chemistry select and other
 - HV baseboard include direct HV power for two channels and external 5V 7.5A reg for Arduino/RX power;
 - Basic baseboard include external 5V 5A(max 2A) reg for Arduino power for maximum stability for voltage readings;
 - all baseboards support for 2 parallel connected piezo-buzzers(integrated and external), only 5V-type;
-- All baseboard use external 2s LiPo/LiFe power supply connectors (see Docs\ for example shemes);
+- All baseboard use external 2s LiPo/LiFe power supply connectors (see Docs for example wiring connections);

@@ -16,7 +16,7 @@ Smart KillSwitch on Arduino for safiest shutdown gas engine and other useful fea
 
 ## Logic
 (released)
-Sketch read PPM paket from RX (or from embedded servotester with potentiometer and service jumper), detect LOW/HIGH channel position, press(from HIGH to LOW) count and changing engine ignition ON/OFF state. Buzzer short beeps on switching with different tones.
+Sketch read PPM packets from RX (or from embedded servotester with potentiometer and service jumper), detect LOW/HIGH channel position, press(from HIGH to LOW) count and changing engine ignition ON/OFF state. Buzzer short beeps on switching with different tones.
 
 If switch pressed 3 times within 2 sec - run Search Buzzer beeps(0.5sec cycle). Next press 3 times within 2 sec - disable Search Buzzer.
 
@@ -38,11 +38,11 @@ Can be enable sound notification for low level capacity(confugurable constant).
 
 
 LED indicator states:
-Solid GREEN - normal work
-Blinking GREEN - Battery low voltage (Level1) 
-Blinking GREEN and Buzzer beeping - Battery ultra low voltage (Level2) 
-Blinking BLUE and Buzzer fast beeping - No RX signal alert
-Blinking RED - Engine is OFF
+- Solid GREEN - normal work
+- Blinking GREEN - Battery low voltage (Level1) 
+- Blinking GREEN and Buzzer beeping - Battery ultra low voltage (Level2) 
+- Blinking BLUE and Buzzer fast beeping - No RX signal alert
+- Blinking RED - Engine is OFF
 
 Sketch write all telemetry to Serial: states, switching count, actual voltage/average voltage, battery type, servotester PPM out in ms/RX PPM read in ms. 
 If connect to baseboard any BT module(example HC-05), all telemetry may be read on any mobile phone/tablet with BT serial reciver application.

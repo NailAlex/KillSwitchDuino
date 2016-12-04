@@ -91,7 +91,7 @@
 #define SYSTEM_MENU_34_EN_CURRENT_RENDER 34               //Enable/Disable CurrentSensor info render to Serial Port  (for Feature ver 2.2)
 #define SYSTEM_MENU_40_DEFAULTS 50                        //Reset Config to Default
 #define SYSTEM_CALIBRATING 100                            //RX inpout Calibrating mode
-
+  
 
 //Menus 
 #define MENU_INITIAL_PERIOD 5000                          //Time period from end SYSTEM_FIRST_START procedure for enter in Menu Mode (3 times switch press)
@@ -137,7 +137,7 @@ uint8_t SystemMode = SYSTEM_NORMAL;                       //System Mode state
 bool SystemServiceMode = false;                           //Enable embedded servotester for PPM generating(SYSTEM_SERVICE_PIN must be HIGH)
 
 //System state vars
-bool SwitchPOS = false;                                   //Switch position. TRUE if down, FALSE if UP
+bool SwitchPOS = true;                                    //Switch position. TRUE if down, FALSE if UP
 bool SwitchPOS_fromUp = false;                            //from upper position flag
 bool EngineSTOP = false;                                  //Switch for cut-off engine ignition
 bool EngineSTOP_flag = false;                             //Stopflag for prevent fast double switching
@@ -248,15 +248,12 @@ Servo myservo;                                            //Servo Tester Generat
 // ================================================================
 
 void MainSWHandler(){
-//reset packets counter
-  if (MainSWPacketsCounter >= 50) { MainSWPacketsCounter=0;}  
-
 //reading PPM signal from channel
-     if (digitalRead(MAINSWITCH_IN_PIN) == HIGH) 
+     if (digitalRead(MAINSWITCH_IN_PIN) == HIGH) //if LOW->HIGH front detected, save it!
         {MainSWTime1 = micros(); } 
-     else {MainSWTime2 = micros();
+     else {MainSWTime2 = micros();//if HIGH->LOW front detected, save it too!
            //counter overflow correction (~70min)
-           if (MainSWTime2<MainSWTime1) {MainSWTime2=MainSWTime1+100;}
+           if (MainSWTime2<MainSWTime1) {MainSWTime2=MainSWTime1+2000;}
            //calc PPM signal length and packets count
            MainSWTime = MainSWTime2 - MainSWTime1;
            MainSWPacketsCounter++;
@@ -265,9 +262,12 @@ void MainSWHandler(){
 
 //switch handling
  if (MainSWTime >= PPMSwitchLevel)
-    {//Switch in Upper position
-     SwitchPOS=true;
-     SwitchPOS_fromUp=true;}
+    {//Switch in Upper position! proccessing for only one time change
+     if (!SwitchPOS_fromUp){
+     SwitchPOS=true;         
+     SwitchPOS_fromUp=true;
+     }
+     }
  else 
    { 
      //Switch in Lower position and if last position is Upper then proccessing for only one time change
@@ -279,9 +279,9 @@ void MainSWHandler(){
       MainSWPressCounterChange=true;
       //reset position change flag
       SwitchPOS_fromUp=false;
-      }
    }
-
+  }
+  if (MainSWPacketsCounter >= 50) { MainSWPacketsCounter=1;}
 }
 
 //-----------------------------------------------------------------
@@ -293,7 +293,7 @@ void readMainBattVoltage(){
 int value =0;
 float vout=0;
   value = analogRead(MAIN_VOLTAGE_BATT_PIN);
-  vout = (value * V_REF) / 1024.0;
+  vout = (value * V_REF) / 1024.0;  
   MainBattVoltage = (vout / (MainBattR2/(MainBattR1+MainBattR2))) + MAIN_BATT_VADD;
 }
   
@@ -1101,31 +1101,35 @@ void MainStateHandler(){
 
 //Engine STOP handling
 //in Normal operating mode Engine stop signal equal Switch position: lower pos = OFF, upper pos = ON
- if (SystemMode==SYSTEM_NORMAL){EngineSTOP=!SwitchPOS;} //Set EngineSTOP with Switch position Up=FALSE, Down=TRUE
- 
+ if (SystemMode==SYSTEM_NORMAL){
+  LastEngineSTOP=EngineSTOP;
+  EngineSTOP=!SwitchPOS;} //Set EngineSTOP with Switch position Up=FALSE, Down=TRUE
+
+if (!SystemStatusNoRX) {
  if (!EngineSTOP) { //if SwitchPOS in Upper position(ignition is ON) then setup output pin to HIGH one time!
   //prevent high speed duplicate switching with potential glitches with flags 
   if (!EngineSTOP_flag) {
      digitalWrite(KILLSWITCH_OUT_PIN, HIGH); 
      tone(BUZZER_PIN,2300,30);
-     LastEngineSTOP=EngineSTOP;
      EngineSTOP_flag=true;
   }
  } 
  else 
  { //if SwitchPOS in Lower position(ignition is OFF) then setup output pin to LOW one time!
    //prevent high speed duplicate switching with potential glitches.
-  if (EngineSTOP!=LastEngineSTOP) //if EngineSTOP real change his state then setup output pin and play sound
+  if (EngineSTOP_flag)
       {digitalWrite(KILLSWITCH_OUT_PIN, LOW);
        tone(BUZZER_PIN,200,30); 
-       LastEngineSTOP=EngineSTOP;
        EngineSTOP_flag=false;}
  }
+} else {EngineSTOP=LastEngineSTOP;};
+
 
  //NoRX handling
   if (MaxMainSWPacketsCounter<=1) {
       SystemStatusNoRX=true;
      } else {SystemStatusNoRX=false;}
+
  
  //if Switch pressed(from Up to Down) then handling options  
    if (millis()-MainSWPressLaststime<=BUZZER_SEARCHER_PERIOD && MainSWPressCounter>=1) 
@@ -1288,40 +1292,42 @@ void setup() {
    Serial.begin(38400);
    Wire.begin();
   
-  //Pin setup
-  pinMode(MAINSWITCH_IN_PIN, INPUT);
-  pinMode(SYSTEM_SERVICE_PIN, INPUT);
-  pinMode(SERVO_TESTER_OUT_PIN, OUTPUT);
-  pinMode(KILLSWITCH_OUT_PIN, OUTPUT);
-  digitalWrite(KILLSWITCH_OUT_PIN, LOW);
-  pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(BUZZER_PIN, LOW);
-
- //Setup the LED pin as an output:
+//Setup the LED pin as an output:
   pinMode(LED_PIN, OUTPUT);
   pinMode(MAIN_LED_R, OUTPUT);
   pinMode(MAIN_LED_G, OUTPUT);
   pinMode(MAIN_LED_B, OUTPUT);
 
- //Setup hardware interrupt point
+//Setup PPM and Servo pins
+  pinMode(MAINSWITCH_IN_PIN, INPUT);
   digitalWrite(MAINSWITCH_IN_PIN, HIGH);
+  pinMode(KILLSWITCH_OUT_PIN, OUTPUT);
+//attach hardware interrupt with ANY CHANGE option
   attachInterrupt(0,MainSWHandler,CHANGE);
 
-  SystemServiceMode=false;
+//Setup Buzzer Pin   
+  pinMode(BUZZER_PIN, OUTPUT);
+//  digitalWrite(BUZZER_PIN, LOW);
 
-  SearchBuzzerOn_flag=false;
+//Setup Service Mode pin
+ pinMode(SYSTEM_SERVICE_PIN, INPUT);
+ if (digitalRead(SYSTEM_SERVICE_PIN)==HIGH) {
+ pinMode(SERVO_TESTER_OUT_PIN, OUTPUT);
+ SystemServiceMode=true;
+  myservo.attach(SERVO_TESTER_OUT_PIN);} 
+ else {SystemServiceMode=false;}
 
- //Setup software timer interrupt 
+ //Setup software timer interrupt. 250ms cycle
   int tickEvent = m_timer.every(250, MainTimerHandler);  
 
  //Setup system mode to first start for normal use interrupts 
   SystemMode = SYSTEM_FIRST_START;
- 
 }
 
 //-----------------------------------------------------------------
 
 void FirstTimeRunInit(){
+
  if (ReadEEPROMConfig()) {
         Serial.println("EEPROM Config clean. Use DEFAULTS!");
         WriteEEPROMConfig();
@@ -1329,19 +1335,38 @@ void FirstTimeRunInit(){
         else
         {Serial.println("Use EEPROM Config. Set parameters");}
 
- if (digitalRead(SYSTEM_SERVICE_PIN)==HIGH) {
-  SystemServiceMode=true;
-  myservo.attach(SERVO_TESTER_OUT_PIN);}
-  RenderCurrentConfig();
-  PlayMenuSound(SOUND_KSW_INTRO);
-
-   //reset counters
-   MainSWPressCounter=0;
+//Setup voltages
    readMainBattVoltage();
+   MainBattVoltageAverage=MainBattVoltage;
+   
+   //reset counters
+   MainSWPacketsCounter=0;
+   MainSWPressCounter=0;
    MainBattVoltageCount=0;
    MainBattVoltageSum=0.0;
    MainBattVoltageAverage_time=7;
-   MainBattVoltageAverage=MainBattVoltage;
+
+//Setup flags
+   EngineSTOP_flag=false; 
+   SearchBuzzerOn_flag=false;
+   
+
+//First MainSwitch reading   
+   if (MainSWTime >= PPMSwitchLevel)
+    {
+     //Switch in Upper position
+     SwitchPOS=true;
+     SwitchPOS_fromUp=true;} else 
+     {
+     //Switch in Lower position
+     SwitchPOS=false;
+     SwitchPOS_fromUp=false;}
+
+
+  PlayMenuSound(SOUND_KSW_INTRO);
+
+
+  RenderCurrentConfig();
 
   //initial menu time readings
    MainSWPressLaststime=millis();  

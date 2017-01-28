@@ -2,41 +2,12 @@
 /* Smart KillSwitchDuino for flying model aircraft with gasoline engine and electronic inginion
  * Author: NailMan
  * Controller type: Arduino Nano(Mega328)
- * Project site: https://github.com/NailAlex/KillSwitchDuino
+ * Project site: http://github.com/NailAlex/KillSwitchDuino
  * 
- * Version: 2.1 (current)
- * + Full recode 
- * + many changes and addons
- * - remove Engine blocking at critical alerts(Low Voltage, No RX signal
- * + add serial render parameters choice (on/off only needed parameters) in Menu
- * 
- *  
- * Version: 1.2
- * + add to menu Low Batt voltage Level2 blocking feature for non blocking operating
- * + add sound signals for Low Batt voltage Level1 alert
- * = changed battery chemistry constants and level1/level2 selector
- * + add minimum battery voltage parameter to telemetry
- * + add serial render parameters choice (on/off only needed parameters)
- * 
- * Version: 1.1
- * Features:
- * 1 - Handle PPM signal from RX for Kill Switching operate
- * 2 - Service mode(PIN D12 HIGH/LOW) for activate embedded servotester with external 10K Ohm variable resistor(PIN A1). No TX/RX needed!
- * 3 - Embedded RX voltage reading, analyze and blocking killswitch working if battery voltage i Low/Very Low for 2 sec average value(Level1 - soft block/Level2 - hard block)
- * 4 - Beeper for seaching mode(0.5sec cycle), audialize kill switching (short ping) and Imperial March for Level2 Voltage Alert
- * 5 - Three-color LED indicator: Greed solid - NORMAL, Green flash - Batt Low Voltage, Red flashing - Engine Off, Blue flash - No RX signal.
- * 6 - Serial port telemetry output for external serial devices(Bluetooth)
- * 7 - Configuration mode (like ESC) with EPPROM config saving:
- * a) RX signal calibrating procedure
- * b) Engine stopping if no RX signal (FailSave)
- * c) RX battery chemistry type select(LiPO, LiFE) for correct battery protecting
- * d) reset to Defaults
- * e) exit to normal mode
+ * Version: 2.3 beta (current)
  * 
  * Used Libraries
  * Timer - //http://github.com/JChristensen/Timer
- * 
- * 
  */
 
 
@@ -83,16 +54,11 @@
 #define SYSTEM_FIRST_START 1                              //One Time initial startup procedure(after basic setup() )
 #define SYSTEM_MENU_M 9                                   //Main menu
 #define SYSTEM_MENU_10_CAL 10                             //Calibrate RX input
-#define SYSTEM_MENU_20_BTYPE 20                           //Select Battery Chemistry type
-#define SYSTEM_MENU_30_RENDER 30                          //Select Battery Chemistry type
-#define SYSTEM_MENU_31_EN_SYSSTATES_RENDER 31             //Enable/Disable System States info(Counters, Alerts) render to Serial Port
-#define SYSTEM_MENU_32_EN_BATTINFO_RENDER 32              //Enable/Disable Batetry info(Chemistry type, Voltages) render to Serial Port
-#define SYSTEM_MENU_33_EN_PPMINFO_RENDER 33               //Enable/Disable PPM signal info(Current Levels) render to Serial Port
-#define SYSTEM_MENU_34_EN_CURRENT_RENDER 34               //Enable/Disable CurrentSensor info render to Serial Port  (for Feature ver 2.2)
-#define SYSTEM_MENU_40_DEFAULTS 50                        //Reset Config to Default
+#define SYSTEM_MENU_20_SENSORS 20                           //Select Battery Chemistry type
+#define SYSTEM_MENU_30_RESETS 30                        //Reset Config to Default
+#define SYSTEM_MENU_40_RENDER 40                          //Select Battery Chemistry type
 #define SYSTEM_CALIBRATING 100                            //RX inpout Calibrating mode
   
-
 //Menus 
 #define MENU_INITIAL_PERIOD 5000                          //Time period from end SYSTEM_FIRST_START procedure for enter in Menu Mode (3 times switch press)
 #define MENU_CHOICE_PERIOD 3000                           //Time period for user choice in currentmenu
@@ -114,16 +80,21 @@ const float BATT_LIPO_L2 = 3.0;                           //LiPo L2 level for AL
 #define SOUND_KSW_INTRO 0                                 //SystemOn melody index
 #define SOUND_MM_INTRO 1                                  //Main Menu INTRO melody index
 #define SOUND_MM_OUTRO 2                                  //Main Menu OUTRO melody index (exit to Normal Mode)
-#define SOUND_M1_INTRO 3                                  //Main Menu INTRO melody index
-#define SOUND_M2_INTRO 4                                  //Main Menu INTRO melody index
-#define SOUND_M3_INTRO 5                                  //Main Menu INTRO melody index
-#define SOUND_M31_INTRO 6                                  //Main Menu INTRO melody index
-#define SOUND_M32_INTRO 7                                  //Main Menu INTRO melody index
-#define SOUND_M33_INTRO 8                                  //Main Menu INTRO melody index
-#define SOUND_M34_INTRO 9                                  //Main Menu INTRO melody index
-#define SOUND_M4_DEFS_INTRO 10                             //Main Menu INTRO melody index
+#define SOUND_M1_INTRO 3                                  //Menu 1 INTRO melody index (RX Calibration Submenu)
+#define SOUND_M2_INTRO 4                                  //Menu 2 INTRO melody index (Sensors/Battery Submenu)
+#define SOUND_M3_INTRO 5                                  //Menu 3 INTRO melody index (RESET Submenu)
+#define SOUND_M4_INTRO 6                                  //Menu 3 INTRO melody index (Render Info Select Submenu)
 
-
+//STRING constants
+char St_LiFe[ ] = "LiFe";
+char St_LiPo[ ] = "LiPo";
+char St_Unk[ ] = "Unknown";
+char St_Yes[ ] = "Yes";
+char St_No[ ] = "No";
+char St_Now[ ] = " Now: ";
+char St_SetThis[ ] = " Set this?";
+char St_Exit[ ] = "Exit";
+char St_ChangeTo[ ] = "Change to ";
 
 
 
@@ -161,7 +132,6 @@ const float MainBattR2 = 9825.0;                          //Volt devider lower l
 float V_REF = 5.02;                                       //Accurate voltage vcalue from system linear regulator on device. Need manual read(with multimeter) and fill this var your device!
 float MAIN_BATT_VADD = 0.03;                              //Volt correction addon. Need manual fill with multimeter compare on your device!
 float MainBattVoltageSum = 0;                             //Volt sum for calc average
-byte MainBattVoltageCount = 0;                            //Volt reading count for calc average
 float MainBattVoltageAverage = 0;                         //Average voltage within reading period
 byte MainBattVoltageAverage_time = 7;                     //1 time per 2 seconds period. One tick = 250ms period.
 float MainBattLowVoltageL1 = 0;                           //Current L1 level for Warning and Green MainLED slow blinking and short beeps
@@ -192,6 +162,10 @@ volatile unsigned long MainSWPressLaststime = 0;          //Input Switch press c
 uint8_t MainSWCounterReset_time = 3;                      //StepTimer for reset packet counter
 volatile uint8_t MainSWPacketsCounter = 0;                //PPM packets couter  0<=X<=50
 volatile uint8_t MaxMainSWPacketsCounter = 0;             //Packets per second couter  0<=X<=50
+unsigned int LastMaxMainSWPacketsCounter = 0;                  //Packets per second couter  0<=X<=50
+unsigned int MainSWPacketsSum = 0;               //Packets summ for 2 seconds period
+unsigned int MainSWPacketsAverage = 0;                    //Average packets count for 2 second period
+unsigned int LastMainSWPacketsAverage = 0;
 
 
 //Render and tri-LED indicator variables
@@ -218,7 +192,7 @@ bool StatusNoRXMainLEDOn_flag = false;                    //NoRX flag for preven
 bool RenderSystemStates = true;                           //Enable/disable System States to Serial Port
 bool RenderBatteryInfo = true;                            //Enable/disable Battery info to Serial Port
 bool RenderPPMInfo = true;                                //Enable/disable PPM signal info to Serial Port
-bool RenderCurrentInfo = true;                                //Enable/disable PPM signal info to Serial Port
+bool RenderCurrentInfo = true;                            //Enable/disable PPM signal info to Serial Port (if CurrentSensorEnabled=true)
 
 //BUZZER vars
 uint8_t SearchBuzzer_time = 1;                            //SearchBuzzer StepTimer counter. 1FPS beeps
@@ -228,9 +202,28 @@ bool SearchBuzzerOn_flag = false;                         //SearchBuzzer ON/OFF 
 int  counter = 0;
 
 //Current Sensor
-float CurrentAbs = 0.0;                                   //Momentary current value
-float CurrentConsumed = 0.0;                        //Consumed energy from day start
-uint8_t CurrentCalc_time = 1;                             //CurrentSensor StepTimer counter. 1FPS calculations
+float Current_mA = 0.0;                                   //Momentary current value in mA
+float Current_Max_mA = 0.0;                               //Momentary current value in mA
+float Current_mAperHourConsumed = 0;                      //Consumed energy from C_Censor reset
+float Current_quartAverage_mA = 0.0;                      //Average current value for 1/4 sec
+uint8_t CurrentCalc_time = 3;                             //CurrentSensor StepTimer counter. 1 sec calculations
+bool CurrentSensorEnabled = false;                        //Use or not the Current Sensor
+
+
+// Set your scale factor
+int CurrentSensorScaleFactor = 40;                        // See Scale Factors Below mV per Amp
+                                                          //50A bi-directional = 40
+                                                          //50A uni-directional = 60
+                                                          //100A bi-directional = 20
+                                                          //100A uni-directional = 40
+                                                          //150A bi-directional = 13.3
+                                                          //150A uni-directioal = 26.7
+                                                          //200A bi-directional = 10
+                                                          //200A uni-directional = 20
+// Set you Offset
+int ACSoffset = 2500;                                     // See offsets below
+                                                          //If bi-directional = 2500
+                                                          //If uni- directional = 600
 
    
 
@@ -290,15 +283,21 @@ void MainSWHandler(){
 // ================================================================
 
 void readMainBattVoltage(){
-int value =0;
-float vout=0;
-  value = analogRead(MAIN_VOLTAGE_BATT_PIN);
-  vout = (value * V_REF) / 1024.0;  
+ int value = analogRead(MAIN_VOLTAGE_BATT_PIN);
+ float vout = (value * V_REF) / 1024.0;  
   MainBattVoltage = (vout / (MainBattR2/(MainBattR1+MainBattR2))) + MAIN_BATT_VADD;
 }
   
 //-----------------------------------------------------------------
 
+void readCurrentSensorData(){
+ int RawValue = analogRead(CURRENT_SENSOR_IN_PIN);
+ float Voltage = (RawValue * V_REF * 1000) / 1024.0;                         // Gets you mV
+ Current_mA = abs((Voltage - ACSoffset) / CurrentSensorScaleFactor) * 1000;
+ if (Current_mA>Current_Max_mA) {Current_Max_mA=Current_mA;}
+}
+
+//-----------------------------------------------------------------
 void readServoTester(){
  ServoInValue=analogRead(SERVO_TESTER_IN_PIN);
  ServoOutMS = map(ServoInValue,0,1023,PPMLowerLevel,PPMUpperLevel);
@@ -323,7 +322,6 @@ void beep(int note, int duration)
 {
 //Play tone on buzzerPin
 tone(BUZZER_PIN, note, duration);
-
  
 //Play different LED depending on value of 'counter'
   if(counter % 2 == 0)
@@ -380,67 +378,31 @@ void PlayMenuSound(const byte stype){
    case SOUND_M1_INTRO:  //Calibrating SubMenu Intro
      tone(BUZZER_PIN,2300,200);
      delay(200);
-     tone(BUZZER_PIN,200,200);
+     tone(BUZZER_PIN,500,200);
      delay(200);
      tone(BUZZER_PIN,2300,200);
      delay(200);
      noTone(BUZZER_PIN);
     break;
-   case SOUND_M2_INTRO:  //Battery Chemistry SubMenu Intro
-     tone(BUZZER_PIN,2300,500);
+   case SOUND_M2_INTRO:  //Sensors SubMenu Intro
+     tone(BUZZER_PIN,1500,500);
      delay(500);
-     tone(BUZZER_PIN,200,150);
-     delay(150);
+     tone(BUZZER_PIN,2300,200);
+     delay(200);
      noTone(BUZZER_PIN);
     break;    
-   case SOUND_M3_INTRO:  //NoRX Engine Off SubMenu Intro
-     tone(BUZZER_PIN,200,500);
-     delay(500);
-     tone(BUZZER_PIN,2300,150);
-     delay(150);
-     noTone(BUZZER_PIN);
-    break;    
-   case SOUND_M31_INTRO:  //Enable/Disable Low voltage engine blocking
-     tone(BUZZER_PIN,700,150);
-     delay(150);
-     tone(BUZZER_PIN,1400,150);
-     delay(150);
-     tone(BUZZER_PIN,2100,150);
-     delay(150);
-     noTone(BUZZER_PIN);
-    break;    
-   case SOUND_M32_INTRO:  //Enable/Disable Low voltage engine blocking
-     tone(BUZZER_PIN,1800,150);
-     delay(150);
-     tone(BUZZER_PIN,900,150);
-     delay(150);
-     tone(BUZZER_PIN,450,150);
-     delay(150);
-     noTone(BUZZER_PIN);
-    break;    
-   case SOUND_M33_INTRO:  //Enable/Disable Low voltage engine blocking
-     tone(BUZZER_PIN,450,150);
-     delay(150);
-     tone(BUZZER_PIN,900,150);
-     delay(150);
-     tone(BUZZER_PIN,450,150);
-     delay(150);
-     noTone(BUZZER_PIN);
-    break;    
-   case SOUND_M34_INTRO:  //Enable/Disable Low voltage engine blocking
-     tone(BUZZER_PIN,900,150);
-     delay(150);
-     tone(BUZZER_PIN,450,150);
-     delay(150);
-     tone(BUZZER_PIN,900,150);
-     delay(150);
-     noTone(BUZZER_PIN);
-    break;    
-   case SOUND_M4_DEFS_INTRO:  //Setup to DEFAULTS SubMenu Intro
+   case SOUND_M3_INTRO:  //Resets SubMenu Intro
      tone(BUZZER_PIN,1000,500);
      delay(500);
-     tone(BUZZER_PIN,1000,150);
-     delay(150);
+     tone(BUZZER_PIN,2300,200);
+     delay(200);
+     noTone(BUZZER_PIN);
+    break;    
+   case SOUND_M4_INTRO:  //Render info options SubMenu Intro
+     tone(BUZZER_PIN,2300,500);
+     delay(500);
+     tone(BUZZER_PIN,1000,200);
+     delay(200);
      noTone(BUZZER_PIN);
     break;    
   case SOUND_KSW_INTRO:  //Normal Mode Intro
@@ -474,6 +436,7 @@ void ResetSystemConfig(){
    PPMUpperLevel = DEF_UPPER_PPM_LEVEL; 
    PPMSwitchLevel = DEF_SWITCH_LEVEL;
    MainBattType = BATT_LIFE;
+   CurrentSensorEnabled=false;
    RenderSystemStates = true;
    RenderBatteryInfo = true; 
    RenderPPMInfo = true;    
@@ -496,21 +459,29 @@ void SetupBatteryLevels(){
 }
 
 //-----------------------------------------------------------------
+void RenderBType(){
+          switch (MainBattType) {
+          case BATT_LIFE: 
+            Serial.print(St_LiFe);
+            break;
+           case BATT_LIPO: 
+            Serial.print(St_LiPo); 
+            break;
+            default:
+            Serial.print(St_Unk);
+          }  
+}
+
+//-----------------------------------------------------------------
 
 void RenderCurrentConfig(){
   Serial.println("Config:");
-          switch (MainBattType) {
-          case BATT_LIFE: 
-            Serial.print("Battery type: LiFE");
-            break;
-           case BATT_LIPO: 
-            Serial.print("Battery type: LiPO"); 
-            break;
-            default:
-            Serial.print("Battery type: Unk");
-          }  
-  Serial.print("  PPM levels Up/Lo/Sw: ");Serial.print(PPMUpperLevel);Serial.print("/");Serial.print(PPMLowerLevel);Serial.print("/");Serial.print(PPMSwitchLevel);Serial.print(" | Render Options(States/Battery/RX/CurrentSensor) : ");
-  Serial.print(RenderSystemStates); Serial.print(" / ");Serial.print(RenderBatteryInfo);Serial.print(" / ");Serial.print(RenderPPMInfo);Serial.print(" / ");Serial.println(RenderCurrentInfo);
+  Serial.print("B_Type: ");RenderBType();
+  Serial.print(" PPM_lvl Up/Lo/Sw: ");Serial.print(PPMUpperLevel);Serial.print("/"); Serial.print(PPMLowerLevel);Serial.print("/"); Serial.print(PPMSwitchLevel);
+  Serial.print(" | R_Options (Stats/Bat/RX/CurSensor) : "); Serial.print(RenderSystemStates); Serial.print("/");
+                                                            Serial.print(RenderBatteryInfo);Serial.print("/");
+                                                            Serial.print(RenderPPMInfo);Serial.print("/");
+                                                            Serial.println(RenderCurrentInfo);
 }
 
 //-----------------------------------------------------------------
@@ -554,12 +525,14 @@ bool ReadEEPROMConfig(){
    MainBattType=EEPROM.read(7);
    SetupBatteryLevels(); 
    b=EEPROM.read(8);
-   if (b==3) {RenderSystemStates=true;} else {RenderSystemStates=false;}
+   if (b==3) {CurrentSensorEnabled=true;} else {CurrentSensorEnabled=false;}
    b=EEPROM.read(9);
-   if (b==3) {RenderBatteryInfo=true;} else {RenderBatteryInfo=false;}
+   if (b==3) {RenderSystemStates=true;} else {RenderSystemStates=false;}
    b=EEPROM.read(10);
-   if (b==3) {RenderPPMInfo=true;} else {RenderPPMInfo=false;}
+   if (b==3) {RenderBatteryInfo=true;} else {RenderBatteryInfo=false;}
    b=EEPROM.read(11);
+   if (b==3) {RenderPPMInfo=true;} else {RenderPPMInfo=false;}
+   b=EEPROM.read(12);
    if (b==3) {RenderCurrentInfo=true;} else {RenderCurrentInfo=false;}
    newc=false; 
   }
@@ -575,10 +548,11 @@ void WriteEEPROMConfig(){
   EEPROMWriteInt(3,PPMUpperLevel);
   EEPROMWriteInt(5,PPMSwitchLevel);
   EEPROM.write(7,MainBattType);
-  if (RenderSystemStates) {EEPROM.write(8, 3);} else {EEPROM.write(8, 5);}
-  if (RenderBatteryInfo) {EEPROM.write(9, 3);} else {EEPROM.write(9, 5);}
-  if (RenderPPMInfo) {EEPROM.write(10, 3);} else {EEPROM.write(10, 5);}
-  if (RenderCurrentInfo) {EEPROM.write(11, 3);} else {EEPROM.write(11, 5);}
+  if (CurrentSensorEnabled) {EEPROM.write(8, 3);} else {EEPROM.write(8, 5);}
+  if (RenderSystemStates) {EEPROM.write(9, 3);} else {EEPROM.write(9, 5);}
+  if (RenderBatteryInfo) {EEPROM.write(10, 3);} else {EEPROM.write(10, 5);}
+  if (RenderPPMInfo) {EEPROM.write(11, 3);} else {EEPROM.write(11, 5);}
+  if (RenderCurrentInfo) {EEPROM.write(12, 3);} else {EEPROM.write(12, 5);}
   //write header2
   EEPROM.write(31,35);
 }
@@ -588,37 +562,114 @@ void WriteEEPROMConfig(){
 // ===                     OTHER FUNCTIONS                      ===
 // ================================================================
 
+void ShowValue(const byte smode,const byte item){
+ 
+ if (smode==SYSTEM_MENU_M) {
+    switch (item) {
+    case 1: 
+      Serial.print("Calibrate RX");
+    break;
+    case 2: 
+      Serial.print("Sensors/Battery");
+    break;
+    case 3: 
+      Serial.print("Resets");
+    break;
+    case 4: 
+      Serial.print("Render");
+    break;
+    case 5: 
+     Serial.print(St_Exit);
+    break;    
+   }
+ }
+
+ if (smode==SYSTEM_MENU_10_CAL) {
+    switch (item) {
+    case 1: 
+      Serial.print("Start calibrating");
+    break;
+    case 2: 
+     Serial.print(St_Exit);
+    break;    
+   }
+ }
+
+
+ if (smode==SYSTEM_MENU_20_SENSORS) {
+    switch (item) {
+    case 1: 
+      Serial.print(St_ChangeTo);Serial.print(St_LiFe);Serial.print(St_Now);RenderBType();Serial.print(St_SetThis); 
+    break;
+    case 2: 
+      Serial.print(St_ChangeTo);Serial.print(St_LiPo);Serial.print(St_Now);RenderBType();Serial.print(St_SetThis); 
+    break;
+    case 3: 
+     Serial.print("C_Sensor enabled: "); if (CurrentSensorEnabled) Serial.print(St_Yes); else Serial.print(St_No);
+    break;    
+    case 4: 
+     Serial.print(St_Exit);
+    break;    
+   }
+ }
+
+ if (smode==SYSTEM_MENU_30_RESETS) {
+    switch (item) {
+    case 1: 
+      Serial.print("C_Sensor Reset?");
+    break;
+    case 2: 
+      Serial.print("Config Reset?");
+    break;
+    case 3: 
+     Serial.print(St_Exit);
+    break;    
+   }
+ }
+
+ if (smode==SYSTEM_MENU_40_RENDER) {
+    switch (item) {
+    case 1: 
+     Serial.print("Show Sys States: "); if (RenderSystemStates) Serial.print(St_Yes); else Serial.print(St_No);
+    break;    
+    case 2: 
+     Serial.print("Show Batt Info: "); if (RenderBatteryInfo) Serial.print(St_Yes); else Serial.print(St_No);
+    break;    
+    case 3: 
+     Serial.print("Show PPM Info: "); if (RenderPPMInfo) Serial.print(St_Yes); else Serial.print(St_No);
+    break;    
+    case 4: 
+     Serial.print("Show C_Sensor info: "); if (RenderCurrentInfo) Serial.print(St_Yes); else Serial.print(St_No);
+    break;    
+    case 5: 
+     Serial.print(St_Exit);
+    break;    
+   }
+ }
+}
+
+//-----------------------------------------------------------------
+
 void RenderMenuNavigation(){
   switch (SystemMode) {
   case SYSTEM_MENU_M: 
     Serial.print("MAIN MENU"); 
     break;
    case SYSTEM_MENU_10_CAL: 
-    Serial.print("M1_CALIBRATING RX"); 
+    Serial.print("M1_CAL"); 
     break;   
-   case SYSTEM_MENU_20_BTYPE: 
-    Serial.print("M2_BATTERY TYPE SELECT"); 
+   case SYSTEM_MENU_20_SENSORS: 
+    Serial.print("M2_SENS"); 
     break;    
-   case SYSTEM_MENU_30_RENDER: 
-    Serial.print("M3_RENDER OPTIONS SELECT"); 
+   case SYSTEM_MENU_30_RESETS: 
+    Serial.print("M3_RESETS"); 
     break;
-   case SYSTEM_MENU_31_EN_SYSSTATES_RENDER: 
-    Serial.print("M3-1_SYSTEM STATES RENDER"); 
-    break;
-   case SYSTEM_MENU_32_EN_BATTINFO_RENDER: 
-    Serial.print("M3-2_BATTERY INFO RENDER"); 
-    break;
-   case SYSTEM_MENU_33_EN_PPMINFO_RENDER: 
-    Serial.print("M3-3_PPM INFO RENDER"); 
-    break;
-   case SYSTEM_MENU_34_EN_CURRENT_RENDER: 
-    Serial.print("M3-4_CURRENT INFO RENDER"); 
-    break;
-   case SYSTEM_MENU_40_DEFAULTS: 
-    Serial.print("M4_RESET TO DEFAULTS"); 
+   case SYSTEM_MENU_40_RENDER: 
+    Serial.print("M4_RENDER"); 
     break;
  }
-  Serial.print(" | Item : "); Serial.println(MenuItem);      
+  Serial.print(" | Item: "); Serial.print(MenuItem);Serial.print(" "); ShowValue(SystemMode,MenuItem);
+  Serial.println(" ");
 }
 
 //-----------------------------------------------------------------
@@ -630,34 +681,28 @@ void RenderTelemetry(){
  
   //System states render
   if (RenderSystemStates) {
-  Serial.print("KSW: ");Serial.print(!EngineSTOP);Serial.print("/"); Serial.print(MaxMainSWPacketsCounter);Serial.print("/");  Serial.print(MainSWPressCounter);
-  Serial.print(" | Serv/NoRX/LowBatt/Buzzer: ");Serial.print(SystemServiceMode);Serial.print("/");Serial.print(SystemStatusNoRX);Serial.print("/");Serial.print(SystemStatusLowBatt);Serial.print("/");Serial.print(SearchBuzzerActive);
+  Serial.print("KSW: ");Serial.print(!EngineSTOP);Serial.print("/"); Serial.print(LastMaxMainSWPacketsCounter);Serial.print("/"); Serial.print(LastMainSWPacketsAverage);Serial.print("/"); Serial.print(MainSWPressCounter);
+  Serial.print(" | Serv/NoRX/LowBatt/Buzz: ");Serial.print(SystemServiceMode);Serial.print("/");
+                                              Serial.print(SystemStatusNoRX);Serial.print("/");
+                                              Serial.print(SystemStatusLowBatt);Serial.print("/");
+                                              Serial.print(SearchBuzzerActive);
   }
 
   //Battery status render
   if (RenderBatteryInfo) {
-  Serial.print(" | Volt/Avg/Type: ");Serial.print(MainBattVoltage);Serial.print("/");Serial.print(MainBattVoltageAverage);Serial.print("/");
-  switch (MainBattType) {
-   case BATT_LIFE: 
-    Serial.print("LiFE");
-    break;
-   case BATT_LIPO: 
-    Serial.print("LiPO"); 
-    break;
-    default:
-    Serial.print("Unk");
-  }
+  Serial.print(" | Volt/Avg/Type: ");Serial.print(MainBattVoltage);Serial.print("/");Serial.print(MainBattVoltageAverage);Serial.print("/");RenderBType();
   }
 
   //RX info render
   if (RenderPPMInfo) {
-  Serial.print(" | RX Gen/Read/SW: ");Serial.print(ServoOutMS);Serial.print("/");Serial.print(MainSWTime);Serial.print("/");Serial.print(PPMSwitchLevel);}
+  Serial.print(" | PPM Gen/Read/SW: ");Serial.print(ServoOutMS);Serial.print("/");Serial.print(MainSWTime);Serial.print("/");Serial.print(PPMSwitchLevel);}
 
 
-  if (RenderCurrentInfo) {
-  Serial.print(" | CurrSens Abs/Cons: ");Serial.print(CurrentAbs);Serial.print("/");Serial.print(CurrentConsumed);}
+  if (RenderCurrentInfo && CurrentSensorEnabled) {
+  Serial.print(" | C_Sens Mom/Max/Cons: ");Serial.print(Current_mA);Serial.print("/");Serial.print(Current_Max_mA);Serial.print("/");Serial.print(Current_mAperHourConsumed);
+  }
   
-  Serial.println(" ");
+  Serial.println("");
  
 }
 
@@ -708,14 +753,14 @@ else{
    case 1:   //Go To Calibrating RX signal input
     if (MenuItemSelected) {SystemMode=SYSTEM_MENU_10_CAL;MenuItem=0;}
     break;    
-   case 2:   //Go To Battery chemistry type select 
-    if (MenuItemSelected) {SystemMode=SYSTEM_MENU_20_BTYPE;MenuItem=0;}
+   case 2:   //Go To Battery chemistry type and Sensors select 
+    if (MenuItemSelected) {SystemMode=SYSTEM_MENU_20_SENSORS;MenuItem=0;}
     break;
-   case 3:   //Go To Render options select 
-    if (MenuItemSelected) {SystemMode=SYSTEM_MENU_30_RENDER;MenuItem=0;}
+   case 3:   //Go To RESETS procedures
+    if (MenuItemSelected) {SystemMode=SYSTEM_MENU_30_RESETS;MenuItem=0;}
     break;
-   case 4:   //Go To DEFAULTS procedure
-    if (MenuItemSelected) {SystemMode=SYSTEM_MENU_40_DEFAULTS;MenuItem=0;}
+   case 4:   //Go To Render options select 
+    if (MenuItemSelected) {SystemMode=SYSTEM_MENU_40_RENDER;MenuItem=0;}
     break;
    case 5:  //Exit to Normal Mode
     if (MenuItemSelected) {
@@ -737,7 +782,8 @@ void Menu10Handler (){
 //1 beep - Start Calibration procedure
 //2 beeps - Exit to Main Menu
 
- if (MenuItem==0) {PlayMenuSound(SOUND_M1_INTRO); MenuIntroPlayed=false;MenuItem=1; delay(2000);MenuItemTime=millis(); } 
+ if (MenuItem==0) {PlayMenuSound(SOUND_M1_INTRO); MenuIntroPlayed=false;MenuItem=1; delay(2000);} 
+ else{
    MenuItemSelected=MenuInputHandler();
 
  //Play Menu Item selection sound
@@ -747,13 +793,16 @@ void Menu10Handler (){
   if (MenuItem==2) {MenuItem=1;} else {MenuItem++;}   
   MenuIntroPlayed=false; }
     
+ if (MenuItemSelected) {
  switch (MenuItem) {
    case 1:   //Start RX Calibration procedure
-    if (MenuItemSelected) {CalibratingStageCounter=1;SystemMode=SYSTEM_CALIBRATING;}
-    break;    
+    CalibratingStageCounter=1;SystemMode=SYSTEM_CALIBRATING;
+   break;    
    case 2:  //Exit to Main Menu
-    if (MenuItemSelected) {MenuItem=0;SystemMode=SYSTEM_MENU_M;}
-    break;    
+    MenuItem=0;SystemMode=SYSTEM_MENU_M;
+   break;    
+ }
+ }
  }
 }
 
@@ -761,269 +810,150 @@ void Menu10Handler (){
 
 void Menu20Handler (){
 //Select battery chemistry SubMenu
-//1 beep - LiFe battery
-//2 beep - LiPolymer battery
-//3 beeps - Exit to Main Menu
- if (MenuItem==0) {PlayMenuSound(SOUND_M2_INTRO); MenuIntroPlayed=false;MenuItem=1; delay(2000);MenuItemTime=millis();} 
-   MenuItemSelected=MenuInputHandler();
+//1 beep - Select LiFe battery type
+//2 beep - Select Li-Polymer battery type
+//3 beep - Enable or Disable Current Sensor usage
+//4 beeps - Exit to Main Menu
+ if (MenuItem==0) {PlayMenuSound(SOUND_M2_INTRO); MenuIntroPlayed=false;MenuItem=1; delay(2000);} 
+  else{ MenuItemSelected=MenuInputHandler();
 
   //Play Menu Item selection sound
-  if (!MenuIntroPlayed) {PlayItemSound(MenuItem); MenuIntroPlayed=true;MenuItemTime=millis();MenuItemTime=millis();}
+  if (!MenuIntroPlayed) {PlayItemSound(MenuItem); MenuIntroPlayed=true;MenuItemTime=millis();}
   //Rotate Menu items choice
   if (millis() - MenuItemTime > MENU_CHOICE_PERIOD) {
-  if (MenuItem==3) {MenuItem=1;} else {MenuItem++;} 
+  if (MenuItem==4) {MenuItem=1;} else {MenuItem++;} 
   MenuIntroPlayed=false; } 
     
+ if (MenuItemSelected) {
  switch (MenuItem) {
-   case 1:   //Setup to LiFePO4
-    if (MenuItemSelected) {
+   case 1:   //Select LiFePO4
          MainBattType=BATT_LIFE;
          SetupBatteryLevels(); 
          MenuItem=0;
          MenuIntroPlayed=false;
-      }
     break;    
-   case 2:  //Setup to LiPolymer
-    if (MenuItemSelected) {
+   case 2:  //Select Li-Polymer
          MainBattType=BATT_LIPO;
          SetupBatteryLevels(); 
          MenuItem=0;
          MenuIntroPlayed=false;
-         }
     break;    
-   case 3:  //Exit to Main Menu
+   case 3:  //Enable or Disable Current Sensor usage
+         CurrentSensorEnabled=!CurrentSensorEnabled;
+         if (CurrentSensorEnabled) {tone(BUZZER_PIN,2300,400);} else {tone(BUZZER_PIN,300,400);}
+         MenuItem=0; 
+         MenuIntroPlayed=false;
+    break;    
+   case 4:  //Exit to Main Menu
     if (MenuItemSelected) {MenuItem=0;SystemMode=SYSTEM_MENU_M;}
    break;    
+   }
+ } 
  }
 }
 
 //-----------------------------------------------------------------
 
 void Menu30Handler (){
-//Select Serial Port Render Options SubMenu
-//1 beep - Enable/Disable System States info render
-//2 beep - Enable/Disable Battery info render
-//3 beeps - Enable/Disable RX info render
-//4 beeps - Enable/Disable Current Sensor info render (for future)
-//5 beeps - Exit to Main Menu
- if (MenuItem==0) {PlayMenuSound(SOUND_M3_INTRO); MenuIntroPlayed=false;MenuItem=1; delay(2000);MenuItemTime=millis();} 
-   MenuItemSelected=MenuInputHandler();
-
-  //Play Menu Item selection sound
-  if (!MenuIntroPlayed) {PlayItemSound(MenuItem); MenuIntroPlayed=true;MenuItemTime=millis();MenuItemTime=millis();}
-  //Rotate Menu items choice
-  if (millis() - MenuItemTime > MENU_CHOICE_PERIOD) {
-  if (MenuItem==5) {MenuItem=1;} else {MenuItem++;} 
-  MenuIntroPlayed=false; } 
-    
- switch (MenuItem) {
-   case 1:   //Go to Enable/Disable System States info render SubSubMenu (31)
-    if (MenuItemSelected) {SystemMode=SYSTEM_MENU_31_EN_SYSSTATES_RENDER;MenuItem=0;}
-    break;    
-   case 2:  //Go to Enable/Disable Battery info render SubSubMenu (32)
-    if (MenuItemSelected) {SystemMode=SYSTEM_MENU_32_EN_BATTINFO_RENDER;MenuItem=0;}
-    break;    
-   case 3:   //Go to Enable/Disable RX info render SubSubMenu (33)
-    if (MenuItemSelected) {SystemMode=SYSTEM_MENU_33_EN_PPMINFO_RENDER;MenuItem=0;}
-    break;    
-   case 4:   //Go to Enable/Disable Enable/Disable Current Sensor info render SubSubMenu (34)
-    if (MenuItemSelected) {SystemMode=SYSTEM_MENU_34_EN_CURRENT_RENDER;MenuItem=0;}
-    break;    
-   case 5:  //Exit to Main Menu
-    if (MenuItemSelected) {MenuItem=0;SystemMode=SYSTEM_MENU_M;}
-   break;    
- }
-}
-
-
-//-----------------------------------------------------------------
-
-void Menu31Handler (){
-//Enable/Disable System States info render
-//1 beep - Enable render system states to Serial Port
-//2 beep - Disable render system states to Serial Port
+//RESETs SubMenu
+//1 beep - Reset CurrentSensor data and exit to Main Menu
+//2 beep - Reset Configuration to DEFAULTS and exit to Main Menu
 //3 beeps - Exit to Main Menu
- if (MenuItem==0) {PlayMenuSound(SOUND_M31_INTRO); MenuIntroPlayed=false;MenuItem=1; delay(2000);MenuItemTime=millis();} 
-   MenuItemSelected=MenuInputHandler();
-
-  //Play Menu Item selection sound
-  if (!MenuIntroPlayed) {PlayItemSound(MenuItem); MenuIntroPlayed=true;MenuItemTime=millis();MenuItemTime=millis();}
-  //Rotate Menu items choice
-  if (millis() - MenuItemTime > MENU_CHOICE_PERIOD) {
-  if (MenuItem==3) {MenuItem=1;} else {MenuItem++;} 
-  MenuIntroPlayed=false; } 
-    
- switch (MenuItem) {
-   case 1:   //Enable
-    if (MenuItemSelected) {
-         RenderSystemStates=true;
-         MenuItem=0;
-         MenuIntroPlayed=false;
-      }
-    break;    
-   case 2:  //Disable
-    if (MenuItemSelected) {
-         RenderSystemStates=false;
-         MenuItem=0;
-         MenuIntroPlayed=false;
-         }
-    break;    
-   case 3:  //Exit to Main Menu
-    if (MenuItemSelected) {MenuItem=0;SystemMode=SYSTEM_MENU_30_RENDER;}
-   break;    
- }
-}
-
-//-----------------------------------------------------------------
-
-void Menu32Handler (){
-//Enable/Disable System States info render
-//1 beep - Enable Battery info render to Serial Port
-//2 beep - Disable Battery info render to Serial Port
-//3 beeps - Exit to Main Menu
- if (MenuItem==0) {PlayMenuSound(SOUND_M32_INTRO); MenuIntroPlayed=false;MenuItem=1; delay(2000);MenuItemTime=millis();} 
-   MenuItemSelected=MenuInputHandler();
-
-  //Play Menu Item selection sound
-  if (!MenuIntroPlayed) {PlayItemSound(MenuItem); MenuIntroPlayed=true;MenuItemTime=millis();MenuItemTime=millis();}
-  //Rotate Menu items choice
-  if (millis() - MenuItemTime > MENU_CHOICE_PERIOD) {
-  if (MenuItem==3) {MenuItem=1;} else {MenuItem++;} 
-  MenuIntroPlayed=false; } 
-    
- switch (MenuItem) {
-   case 1:   //Enable
-    if (MenuItemSelected) {
-         RenderBatteryInfo=true;
-         MenuItem=0;
-         MenuIntroPlayed=false;
-      }
-    break;    
-   case 2:  //Disable
-    if (MenuItemSelected) {
-         RenderBatteryInfo=false;
-         MenuItem=0;
-         MenuIntroPlayed=false;
-         }
-    break;    
-   case 3:  //Exit to Main Menu
-    if (MenuItemSelected) {MenuItem=0;SystemMode=SYSTEM_MENU_30_RENDER;}
-   break;    
- }
-}
-
-//-----------------------------------------------------------------
-
-void Menu33Handler (){
-//Enable/Disable System States info render
-//1 beep - Enable RX info render to Serial Port
-//2 beep - Disable RX info render to Serial Port
-//3 beeps - Exit to Main Menu
- if (MenuItem==0) {PlayMenuSound(SOUND_M33_INTRO); MenuIntroPlayed=false;MenuItem=1; delay(2000);MenuItemTime=millis();} 
-   MenuItemSelected=MenuInputHandler();
-
-  //Play Menu Item selection sound
-  if (!MenuIntroPlayed) {PlayItemSound(MenuItem); MenuIntroPlayed=true;MenuItemTime=millis();MenuItemTime=millis();}
-  //Rotate Menu items choice
-  if (millis() - MenuItemTime > MENU_CHOICE_PERIOD) {
-  if (MenuItem==3) {MenuItem=1;} else {MenuItem++;} 
-  MenuIntroPlayed=false; } 
-    
- switch (MenuItem) {
-   case 1:   //Enable
-    if (MenuItemSelected) {
-         RenderPPMInfo=true;
-         MenuItem=0;
-         MenuIntroPlayed=false;
-      }
-    break;    
-   case 2:  //Disable
-    if (MenuItemSelected) {
-         RenderPPMInfo=false;
-         MenuItem=0;
-         MenuIntroPlayed=false;
-         }
-    break;    
-   case 3:  //Exit to Main Menu
-    if (MenuItemSelected) {MenuItem=0;SystemMode=SYSTEM_MENU_30_RENDER;}
-   break;    
- }
-}
-
-//-----------------------------------------------------------------
-
-void Menu34Handler (){
-//Enable/Disable System States info render
-//1 beep - Enable RX info render to Serial Port
-//2 beep - Disable RX info render to Serial Port
-//3 beeps - Exit to Main Menu
- if (MenuItem==0) {PlayMenuSound(SOUND_M33_INTRO); MenuIntroPlayed=false;MenuItem=1; delay(2000);MenuItemTime=millis();} 
-   MenuItemSelected=MenuInputHandler();
-
-  //Play Menu Item selection sound
-  if (!MenuIntroPlayed) {PlayItemSound(MenuItem); MenuIntroPlayed=true;MenuItemTime=millis();MenuItemTime=millis();}
-  //Rotate Menu items choice
-  if (millis() - MenuItemTime > MENU_CHOICE_PERIOD) {
-  if (MenuItem==3) {MenuItem=1;} else {MenuItem++;} 
-  MenuIntroPlayed=false; } 
-    
- switch (MenuItem) {
-   case 1:   //Enable
-    if (MenuItemSelected) {
-         RenderCurrentInfo=true;
-         MenuItem=0;
-         MenuIntroPlayed=false;
-      }
-    break;    
-   case 2:  //Disable
-    if (MenuItemSelected) {
-         RenderCurrentInfo=false;
-         MenuItem=0;
-         MenuIntroPlayed=false;
-         }
-    break;    
-   case 3:  //Exit to Main Menu
-    if (MenuItemSelected) {MenuItem=0;SystemMode=SYSTEM_MENU_30_RENDER;}
-   break;    
- }
-}
-
-//-----------------------------------------------------------------
-//-----------------------------------------------------------------
-//-----------------------------------------------------------------
-
-void Menu40ResetDefaultsHandler (){
-//Reset Configuration to DEFAULTS SubMenu
-//1 beep - Reset to defaults and exit to main menu
-//2 beeps - Exit to Main Menu without changing
-
-if (MenuItem==0) {PlayMenuSound(SOUND_M4_DEFS_INTRO); MenuIntroPlayed=false;MenuItem=1; delay(2000);MenuItemTime=millis();} 
-   MenuItemSelected=MenuInputHandler();
+ if (MenuItem==0) {PlayMenuSound(SOUND_M3_INTRO); MenuIntroPlayed=false;MenuItem=1; delay(2000);
+ } 
+  else{ MenuItemSelected=MenuInputHandler();
 
   //Play Menu Item selection sound
   if (!MenuIntroPlayed) {PlayItemSound(MenuItem); MenuIntroPlayed=true;MenuItemTime=millis();}
   //Rotate Menu items choice
   if (millis() - MenuItemTime > MENU_CHOICE_PERIOD) {
-  if (MenuItem==2) {MenuItem=1;} else {MenuItem++;} 
-  MenuIntroPlayed=false; }
+  if (MenuItem==3) {MenuItem=1;} else {MenuItem++;} 
+  MenuIntroPlayed=false; } 
     
+ if (MenuItemSelected) {
  switch (MenuItem) {
-   case 1:   //Reset Configuration to defaults and Go To Main Menu
-    if (MenuItemSelected) {
-       Serial.println("Reset configuration to DEFAULTS and exit to Main Menu");
-       Serial.print("Current ");
+   case 1:   //Reset CurrentSensor data
+       Serial.println("Reset C_Sensor");
+       Current_Max_mA = 0.0;
+       Current_mAperHourConsumed = 0;
+       MenuItem=0;
+       SystemMode=SYSTEM_MENU_M;
+    break;    
+   case 2:  //Go to Enable/Disable Battery info render SubSubMenu (32)
+       Serial.println("Reset config");
        ResetSystemConfig();
        RenderCurrentConfig();
        MenuItem=0;
        SystemMode=SYSTEM_MENU_M;
-      }
     break;    
-   case 2:  //Exit to Main Menu
+   case 3:  //Exit to Main Menu
     if (MenuItemSelected) {MenuItem=0;SystemMode=SYSTEM_MENU_M;}
+   break;    
+  }
+ }
+ } 
+}
+
+
+//-----------------------------------------------------------------
+
+void Menu40Handler (){
+//Select Serial Port Render Options SubMenu
+//1 beep - Show/Hide System States info
+//2 beeps - Show/Hide Battery info
+//3 beeps - Show/Hide RX info
+//4 beeps - Show/Hide Current Sensor info
+//5 beeps - Exit to Main Menu
+ if (MenuItem==0) {PlayMenuSound(SOUND_M4_INTRO); MenuIntroPlayed=false;MenuItem=1; delay(2000);} 
+ else{  MenuItemSelected=MenuInputHandler();
+
+  //Play Menu Item selection sound
+  if (!MenuIntroPlayed) {PlayItemSound(MenuItem); MenuIntroPlayed=true;MenuItemTime=millis();}
+  //Rotate Menu items choice
+  if (millis() - MenuItemTime > MENU_CHOICE_PERIOD) {
+  if (MenuItem==5) {MenuItem=1;} else {MenuItem++;} 
+  MenuIntroPlayed=false; } 
+
+   
+if (MenuItemSelected) {
+switch (MenuItem) {
+   case 1:   
+         RenderSystemStates=!RenderSystemStates;
+         if (RenderSystemStates) {tone(BUZZER_PIN,2300,400);} else {tone(BUZZER_PIN,300,400);}
+         MenuItem=0; 
+         MenuIntroPlayed=false;
     break;    
+   case 2:  
+         RenderBatteryInfo=!RenderBatteryInfo;
+         if (RenderBatteryInfo) {tone(BUZZER_PIN,2300,400);} else {tone(BUZZER_PIN,300,400);}
+         MenuItem=0; 
+         MenuIntroPlayed=false;
+    break;    
+   case 3:  
+         RenderPPMInfo=!RenderPPMInfo;
+         if (RenderPPMInfo) {tone(BUZZER_PIN,2300,400);} else {tone(BUZZER_PIN,300,400);}
+         MenuItem=0;  //Repeat this item for change
+         MenuIntroPlayed=false;
+    break;    
+   case 4:  
+         RenderCurrentInfo=!RenderCurrentInfo;
+         if (RenderCurrentInfo) {tone(BUZZER_PIN,2300,400);} else {tone(BUZZER_PIN,300,400);}
+         MenuItem=0;  //Repeat this item for change
+         MenuIntroPlayed=false;
+    break;    
+   case 5:  //Exit to Main Menu
+    if (MenuItemSelected) {MenuItem=0;SystemMode=SYSTEM_MENU_M;}
+   break;    
+ }
+ }
  }
 }
 
+
+//-----------------------------------------------------------------
+//-----------------------------------------------------------------
+//-----------------------------------------------------------------
+//-----------------------------------------------------------------
 //-----------------------------------------------------------------
 
 void CalibratingInput (const byte stage){
@@ -1102,9 +1032,9 @@ void MainStateHandler(){
 //Engine STOP handling
 //in Normal operating mode Engine stop signal equal Switch position: lower pos = OFF, upper pos = ON
  if (SystemMode==SYSTEM_NORMAL){
-  LastEngineSTOP=EngineSTOP;
-  EngineSTOP=!SwitchPOS;} //Set EngineSTOP with Switch position Up=FALSE, Down=TRUE
-
+     LastEngineSTOP=EngineSTOP;
+     EngineSTOP=!SwitchPOS;}//Set EngineSTOP with Switch position Up=FALSE, Down=TRUE
+      
 if (!SystemStatusNoRX) {
  if (!EngineSTOP) { //if SwitchPOS in Upper position(ignition is ON) then setup output pin to HIGH one time!
   //prevent high speed duplicate switching with potential glitches with flags 
@@ -1124,14 +1054,7 @@ if (!SystemStatusNoRX) {
  }
 } else {EngineSTOP=LastEngineSTOP;};
 
-
- //NoRX handling
-  if (MaxMainSWPacketsCounter<=1) {
-      SystemStatusNoRX=true;
-     } else {SystemStatusNoRX=false;}
-
- 
- //if Switch pressed(from Up to Down) then handling options  
+//if Switch pressed(from Up to Down) then handling options  
    if (millis()-MainSWPressLaststime<=BUZZER_SEARCHER_PERIOD && MainSWPressCounter>=1) 
    { 
     switch (MainSWPressCounter) {
@@ -1199,19 +1122,18 @@ if (!SystemStatusNoRX) {
 //-----------------------------------------------------------------
 
 void MainTimerHandler(){
-
+//read input data from sensors
+ readCurrentSensorData();
  readMainBattVoltage();
- //calc voltage sum for one more 250ms step
+ 
+//calc voltage sum for one more 250ms step
  MainBattVoltageSum+=MainBattVoltage;
- MainBattVoltageCount++;
-
+ 
  if ( MainBattVoltageAverage_time == 0 ){
-   MainBattVoltageAverage=MainBattVoltageSum / MainBattVoltageCount;
-   MainBattVoltageCount=0;
+   MainBattVoltageAverage=MainBattVoltageSum / 8;
    MainBattVoltageSum=0.0;
    MainBattVoltageAverage_time=7;
  } else MainBattVoltageAverage_time--;
-  
  
  //if main battery voltage between L1 and L2 then simple flashing GREEN system LED 
  if (MainBattVoltageAverage > MainBattLowVoltageL2 && MainBattVoltageAverage <= MainBattLowVoltageL1) 
@@ -1221,9 +1143,34 @@ void MainTimerHandler(){
     {SystemStatusLowBatt = 2;}
  if (MainBattVoltageAverage > MainBattLowVoltageL1) {SystemStatusLowBatt=0;} 
 
+//Current Sensor processing
+ //calc precize average current value for last 250ms
+ Current_quartAverage_mA=(Current_quartAverage_mA+Current_mA) / 2;
 
-//render telemetry 
+ if ( CurrentCalc_time == 0 ){
+   Current_mAperHourConsumed+=Current_quartAverage_mA/3600; 
+   Current_quartAverage_mA=0.0;
+ } else CurrentCalc_time--;
 
+//RX PPM signal processing
+ MainSWPacketsSum += MaxMainSWPacketsCounter;
+
+//reset packets counter after one second
+ if (MainSWCounterReset_time==0) {
+  LastMaxMainSWPacketsCounter = MaxMainSWPacketsCounter;
+  LastMainSWPacketsAverage = MainSWPacketsAverage;
+  MainSWPacketsAverage = int(MainSWPacketsSum / 4);
+   if (MainSWPacketsAverage<=1) 
+   {SystemStatusNoRX=true;
+    EngineSTOP=LastEngineSTOP;
+   } else {SystemStatusNoRX=false;}   
+  MainSWPacketsSum = 0;
+  MaxMainSWPacketsCounter = 0;
+  MainSWCounterReset_time = 3;
+  } else MainSWCounterReset_time--;
+
+
+//Render telemetry 
  if ( Render_time == 0 )
  {
    if (SystemMode==SYSTEM_NORMAL) {RenderTelemetry();}
@@ -1232,7 +1179,6 @@ void MainTimerHandler(){
   } else Render_time--;
 
 
-//LED flashing routines
 //Buzzer flashing
   if ( SearchBuzzer_time == 0 ){
     SearchBuzzerOn = !SearchBuzzerOn;
@@ -1240,6 +1186,7 @@ void MainTimerHandler(){
   } else SearchBuzzer_time--;
 
 
+//LED flashing routines
 //LED13 (develop)
   if ( LED13_time == 0 ){
     LED13On = !LED13On;
@@ -1270,14 +1217,6 @@ void MainTimerHandler(){
    else StatusLowBattMainLEDOn = true;
   StatusLowBatt_time=1;
   } else StatusLowBatt_time--;
-
-
-//reset packets counter after one second
- if (MainSWCounterReset_time==0) {
-  MaxMainSWPacketsCounter=0;
-  MainSWCounterReset_time=3;
- } else MainSWCounterReset_time--;
-
 
 }
 
@@ -1342,15 +1281,19 @@ void FirstTimeRunInit(){
    //reset counters
    MainSWPacketsCounter=0;
    MainSWPressCounter=0;
-   MainBattVoltageCount=0;
    MainBattVoltageSum=0.0;
    MainBattVoltageAverage_time=7;
+   MainSWPacketsSum = 0;
+   LastMaxMainSWPacketsCounter=0;
+   MainSWPacketsAverage = 0;  
 
 //Setup flags
    EngineSTOP_flag=false; 
    SearchBuzzerOn_flag=false;
-   
 
+
+   
+/*
 //First MainSwitch reading   
    if (MainSWTime >= PPMSwitchLevel)
     {
@@ -1361,11 +1304,9 @@ void FirstTimeRunInit(){
      //Switch in Lower position
      SwitchPOS=false;
      SwitchPOS_fromUp=false;}
-
+*/
 
   PlayMenuSound(SOUND_KSW_INTRO);
-
-
   RenderCurrentConfig();
 
   //initial menu time readings
@@ -1396,27 +1337,15 @@ void loop() {
     case SYSTEM_MENU_10_CAL: 
       Menu10Handler();
      break;    
-    case SYSTEM_MENU_20_BTYPE: 
+    case SYSTEM_MENU_20_SENSORS: 
       Menu20Handler();
      break;    
-    case SYSTEM_MENU_30_RENDER: 
+    case SYSTEM_MENU_30_RESETS:
       Menu30Handler();
+     break;
+    case SYSTEM_MENU_40_RENDER: 
+      Menu40Handler();
      break;    
-    case SYSTEM_MENU_31_EN_SYSSTATES_RENDER: 
-      Menu31Handler();
-     break;    
-    case SYSTEM_MENU_32_EN_BATTINFO_RENDER:
-      Menu32Handler();
-     break;
-    case SYSTEM_MENU_33_EN_PPMINFO_RENDER:
-      Menu33Handler();
-     break;
-    case SYSTEM_MENU_34_EN_CURRENT_RENDER:
-      Menu34Handler();
-     break;
-    case SYSTEM_MENU_40_DEFAULTS:
-      Menu40ResetDefaultsHandler();
-     break;
     case SYSTEM_CALIBRATING: 
       if (CalibratingStageCounter==2 || CalibratingStageCounter==4 ) 
         {

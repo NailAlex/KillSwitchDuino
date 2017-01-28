@@ -16,11 +16,13 @@ Smart KillSwitch on Arduino for safiest shutdown gas engine and other useful fea
 
 ## Logic
 (released)
-Sketch read PPM packets from RX (or from embedded servotester with potentiometer and service jumper), detect LOW/HIGH channel position, press(from HIGH to LOW) count and changing engine ignition ON/OFF state. Buzzer short beeps on switching with different tones.
+Sketch read PPM packets from RX (or from embedded servotester with potentiometer and service jumper), detect LOW/HIGH channel position, press(from HIGH to LOW) count 
+and changing engine ignition ON/OFF state. Buzzer short beeps on switching with different tones.
 
 If switch pressed 3 times within 2 sec - run Search Buzzer beeps(0.5sec cycle). Next press 3 times within 2 sec - disable Search Buzzer.
 
 If switch pressed 3 times within 5 sec from start - run Menu Mode for customizing and calibrating
+
 
 Sketch read input battery voltage(need customize constants for actual resistors and regulator voltage value) with these choices:
 - silent Green LED flashing at Low Level (~15% capacity)
@@ -28,7 +30,8 @@ Sketch read input battery voltage(need customize constants for actual resistors 
 
 No engine switching blocking(as previous version) and more stability code.
 
-Sketch analyze PPM RX signal quality for engine switching. If RX connection is lost or bad(automatic enable Small Search Buzzer until PPM RX signal restore).
+Sketch analyze PPM RX signal quality for engine switching. If RX connection is lost or bad (<5 packets within 2 seconds) automatic enable Small Search Buzzer until PPM RX signal restore. Use the last switch state before 
+RS signal lost detect.
 
 
 (in progress)
@@ -47,7 +50,6 @@ LED indicator states:
 Sketch write all telemetry to Serial: states, switching count, actual voltage/average voltage, battery type, servotester PPM out in ms/RX PPM read in ms. 
 If connect to baseboard any BT module(example HC-05), all telemetry may be read on any mobile phone/tablet with BT serial reciver application.
 In menu mode can be select info blocks for render or disable it
-
 
 Sketch use EEPROM for store config.
 

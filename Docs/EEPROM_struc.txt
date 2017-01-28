@@ -6,8 +6,9 @@ KillSwitchDuino EEPROM memory config structure:
 0003-0004:  2 bytes (unsigned int) – UpperLevel PPM value (default=2000ms), writing - low-high byte
 0005-0006:  2 bytes (unsigned int) – Switching level PPM value (default=1500ms), writing - low-high byte
 0007: 1 byte (byte) – Battery chemistry type. If =17 then - LeFePO4, if =21 then - LiPolymer (default - LiFePO4)
-0008:  1 byte (byte) – Render System States to Serial Port. If =3 then enabled, If =3 then disabled (default - 3)
-0009:  1 byte (byte) – Render Battery Info to Serial Port. If =3 then enabled, If =3 then disabled (default - 3)
-00010:  1 byte (byte) – Render RX Info to Serial Port. If =3 then enabled, If =3 then disabled (default - 3)
-00011:  1 byte (byte) – Render Current Sensor Info to Serial Port. If =3 then enabled, If =3 then disabled (default - 3)  (for future, v2.2)
+0008:  1 byte (bool) – Enable/disable the Current Sensor. If =3 then enabled, If =3 then disabled (default - 5)
+0009:  1 byte (bool) – Render System States to Serial Port. If =3 then enabled, If =3 then disabled (default - 3)
+0010:  1 byte (bool) – Render Battery Info to Serial Port. If =3 then enabled, If =3 then disabled (default - 3)
+0011:  1 byte (bool) – Render RX Info to Serial Port. If =3 then enabled, If =3 then disabled (default - 3)
+0012:  1 byte (bool) – Render Current Sensor Info to Serial Port. If =3 then enabled, If =3 then disabled (default - 3)  (for future, v2.2)
 0031: 1 byte (byte) - tail header. If equal 35 (and start header equal 35) - use config from EEPROM, else use default values

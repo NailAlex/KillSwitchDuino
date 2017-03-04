@@ -1207,9 +1207,7 @@ void MainTimerHandler(){
     {SystemStatusLowBatt = 2;}
  if (MainBattVoltageAverage > MainBattLowVoltageL1) {SystemStatusLowBatt=0;} 
 
-  readCurrentSensorData();
-   Current_quartAverage_mA=(Current_quartAverage_mA + Current_mA) / 2;
-   Current_mAperHourConsumed+=Current_quartAverage_mA / 14400; 
+
 
 //processing RX signal quality
  if ( MainSWPacketsCounter_time == 0 ){
@@ -1232,6 +1230,11 @@ void MainTimerHandler(){
 
 //dump consumed mA to EEPROM 
  if (CurrentSensorEnabled) {
+
+  readCurrentSensorData();
+   Current_quartAverage_mA=(Current_quartAverage_mA + Current_mA) / 2;
+   Current_mAperHourConsumed+=Current_quartAverage_mA / 14400; 
+
  if (CurrentDump_time==0) {
    DumpConsToEEPROM();
    CurrentDump_time=39;

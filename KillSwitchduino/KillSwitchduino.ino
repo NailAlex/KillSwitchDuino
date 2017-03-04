@@ -4,7 +4,7 @@
  * Controller type: Arduino Nano(Mega328)
  * Project site: http://github.com/NailAlex/KillSwitchDuino
  * 
- * Version: 2.3 beta (current)
+ * Version: 2.3 (current)
  * 
  * Used Libraries
  * Timer - //http://github.com/JChristensen/Timer
@@ -85,6 +85,13 @@ const float BATT_LIPO_L2 = 3.0;                           //LiPo L2 level for AL
 #define SOUND_M3_INTRO 5                                  //Menu 3 INTRO melody index (RESET Submenu)
 #define SOUND_M4_INTRO 6                                  //Menu 3 INTRO melody index (Render Info Select Submenu)
 
+//EEPROM
+#define EEPROM_INDEX_ADDRESS 29                           //Index static address for last consumed mA value
+#define EEPROM_DATA_START_ADDRESS 32                      //Index static address for last consumed mA value
+
+//COUNTERS
+#define CSENSOR_READ_PERIOD 100                           //Current Sensor perion for 10FPS readings
+
 //STRING constants
 char St_LiFe[ ] = "LiFe";
 char St_LiPo[ ] = "LiPo";
@@ -115,6 +122,7 @@ bool EngineSTOP_flag = false;                             //Stopflag for prevent
 bool LastEngineSTOP = false;                              //Last SystemEngineSTOP value for NoRX handling
 uint8_t SystemStatusLowBatt = 0;                          //Low battery voltage Warning(=1) or Alert(=2)
 bool SystemStatusNoRX = false;                            //No RX Signal Alert switch. If packets counter ~0 then signal lost
+uint8_t RXsignalRSSI = 100;                               //Low battery voltage Warning(=1) or Alert(=2)
 
 //Menus variables
 bool MenuIntroPlayed = false;         
@@ -129,7 +137,7 @@ byte  MainBattType = BATT_LIFE;                           //Main battery chemist
 float MainBattVoltage = 0.00;                             //Main battery current voltage
 const float MainBattR1 = 14870.0;                         //Volt devider upper leg resistor (+Vin -> read point). Need manual read(with multimeter) and fill this var your device!
 const float MainBattR2 = 9825.0;                          //Volt devider lower leg resistor (read point -> GND). Need manual read(with multimeter) and fill this var your device!
-float V_REF = 5.02;                                       //Accurate voltage vcalue from system linear regulator on device. Need manual read(with multimeter) and fill this var your device!
+float V_REF = 5.02;                                       //Accurate voltage value from system linear regulator on device. Need manual read(with multimeter) and fill this var your device!
 float MAIN_BATT_VADD = 0.03;                              //Volt correction addon. Need manual fill with multimeter compare on your device!
 float MainBattVoltageSum = 0;                             //Volt sum for calc average
 float MainBattVoltageAverage = 0;                         //Average voltage within reading period
@@ -159,13 +167,11 @@ volatile unsigned long MainSWTime2 = 0;                   //Main Switch counter2
 volatile uint8_t MainSWPressCounter = 0;                  //Main Switch press counter (From Upper to lower position)
 volatile bool MainSWPressCounterChange = false;           //Input Switch press counter flag for prevent fast double switching
 volatile unsigned long MainSWPressLaststime = 0;          //Input Switch press counter LastTime
-uint8_t MainSWCounterReset_time = 3;                      //StepTimer for reset packet counter
+volatile unsigned long PPMPacketsTime = 0;                //Main Switch counter1 (start read position). Start after LOW->HIGH detect
 volatile uint8_t MainSWPacketsCounter = 0;                //PPM packets couter  0<=X<=50
 volatile uint8_t MaxMainSWPacketsCounter = 0;             //Packets per second couter  0<=X<=50
-unsigned int LastMaxMainSWPacketsCounter = 0;                  //Packets per second couter  0<=X<=50
-unsigned int MainSWPacketsSum = 0;               //Packets summ for 2 seconds period
-unsigned int MainSWPacketsAverage = 0;                    //Average packets count for 2 second period
-unsigned int LastMainSWPacketsAverage = 0;
+volatile uint8_t LastMaxMainSWPacketsCounter = 0;         //Copy of packets per second couter  0<=X<=50
+uint8_t MainSWPacketsCounter_time = 3;                    //PacketsQuality StepTimer counter. 1FPS
 
 
 //Render and tri-LED indicator variables
@@ -207,10 +213,9 @@ float Current_Max_mA = 0.0;                               //Momentary current va
 float Current_mAperHourConsumed = 0;                      //Consumed energy from C_Censor reset
 float Current_quartAverage_mA = 0.0;                      //Average current value for 1/4 sec
 uint8_t CurrentCalc_time = 3;                             //CurrentSensor StepTimer counter. 1 sec calculations
-bool CurrentSensorEnabled = false;                        //Use or not the Current Sensor
-
-
-// Set your scale factor
+bool CurrentSensorEnabled = true;                         //Use or not the Current Sensor
+byte CurrentDump_time = 39;                               //CurrentSensor consumed amps dump counter. Every 10 sec dumping
+unsigned long CurrentLastMillis = 0;
 int CurrentSensorScaleFactor = 40;                        // See Scale Factors Below mV per Amp
                                                           //50A bi-directional = 40
                                                           //50A uni-directional = 60
@@ -225,7 +230,11 @@ int ACSoffset = 2500;                                     // See offsets below
                                                           //If bi-directional = 2500
                                                           //If uni- directional = 600
 
-   
+
+//EEPROM manager variables
+int eepromSaveAddress = EEPROM_DATA_START_ADDRESS;       //Consumed amps value(4 bytes) eeprom start address: 32..507
+uint8_t eepromSaveCounter = 0;                           //Current session save counter. 
+int eepromEndAddress = 507;                              //End address for save consumed amps value(4 bytes)
 
 
 // ****************************************************************
@@ -241,6 +250,14 @@ Servo myservo;                                            //Servo Tester Generat
 // ================================================================
 
 void MainSWHandler(){
+  if (abs(micros() - PPMPacketsTime) >=1000000) {
+    LastMaxMainSWPacketsCounter = MaxMainSWPacketsCounter;
+    MaxMainSWPacketsCounter=0;
+    MainSWPacketsCounter=0;
+    PPMPacketsTime = micros();
+    }
+//  if (MainSWPacketsCounter >= 50) { MainSWPacketsCounter=1;}
+//  if (MaxMainSWPacketsCounterReset_flag) {MaxMainSWPacketsCounterReset_flag=false;MaxMainSWPacketsCounter=0;}
 //reading PPM signal from channel
      if (digitalRead(MAINSWITCH_IN_PIN) == HIGH) //if LOW->HIGH front detected, save it!
         {MainSWTime1 = micros(); } 
@@ -274,7 +291,6 @@ void MainSWHandler(){
       SwitchPOS_fromUp=false;
    }
   }
-  if (MainSWPacketsCounter >= 50) { MainSWPacketsCounter=1;}
 }
 
 //-----------------------------------------------------------------
@@ -292,7 +308,7 @@ void readMainBattVoltage(){
 
 void readCurrentSensorData(){
  int RawValue = analogRead(CURRENT_SENSOR_IN_PIN);
- float Voltage = (RawValue * V_REF * 1000) / 1024.0;                         // Gets you mV
+ float Voltage = (RawValue * V_REF * 1000) / 1024;                         // Gets you mV
  Current_mA = abs((Voltage - ACSoffset) / CurrentSensorScaleFactor) * 1000;
  if (Current_mA>Current_Max_mA) {Current_Max_mA=Current_mA;}
 }
@@ -436,11 +452,12 @@ void ResetSystemConfig(){
    PPMUpperLevel = DEF_UPPER_PPM_LEVEL; 
    PPMSwitchLevel = DEF_SWITCH_LEVEL;
    MainBattType = BATT_LIFE;
-   CurrentSensorEnabled=false;
+   CurrentSensorEnabled=true;
    RenderSystemStates = true;
    RenderBatteryInfo = true; 
    RenderPPMInfo = true;    
    RenderCurrentInfo = true;
+   Current_mAperHourConsumed = 0;
 }
 
 //-----------------------------------------------------------------
@@ -477,7 +494,9 @@ void RenderBType(){
 void RenderCurrentConfig(){
   Serial.println("Config:");
   Serial.print("B_Type: ");RenderBType();
-  Serial.print(" PPM_lvl Up/Lo/Sw: ");Serial.print(PPMUpperLevel);Serial.print("/"); Serial.print(PPMLowerLevel);Serial.print("/"); Serial.print(PPMSwitchLevel);
+  Serial.print(" | C_Sensor Enable: "); 
+  if (CurrentSensorEnabled) {Serial.print(St_Yes);} else {Serial.print(St_No);}
+  Serial.print(" | PPM Up/Lo/Sw: ");Serial.print(PPMUpperLevel);Serial.print("/"); Serial.print(PPMLowerLevel);Serial.print("/"); Serial.print(PPMSwitchLevel);
   Serial.print(" | R_Options (Stats/Bat/RX/CurSensor) : "); Serial.print(RenderSystemStates); Serial.print("/");
                                                             Serial.print(RenderBatteryInfo);Serial.print("/");
                                                             Serial.print(RenderPPMInfo);Serial.print("/");
@@ -486,7 +505,7 @@ void RenderCurrentConfig(){
 
 //-----------------------------------------------------------------
 
-unsigned int EEPROMReadInt(int p_address)
+unsigned int EEPROMReadInt(unsigned int p_address)
         {
         byte lowByte = EEPROM.read(p_address);
         byte highByte = EEPROM.read(p_address + 1);
@@ -495,13 +514,59 @@ unsigned int EEPROMReadInt(int p_address)
 
 //-----------------------------------------------------------------
 
-void EEPROMWriteInt(int p_address, int p_value)
+void EEPROMWriteInt(int p_address, unsigned int p_value)
         {
         byte lowByte = ((p_value >> 0) & 0xFF);
         byte highByte = ((p_value >> 8) & 0xFF);
         EEPROM.write(p_address, lowByte);
         EEPROM.write(p_address + 1, highByte);
         }
+
+//-----------------------------------------------------------------
+
+float EEPROMReadFloat(int addr) {   
+    byte raw[4];
+   for(byte i = 0; i < 4; i++) raw[i] = EEPROM.read(addr+i);
+    float &num = (float&)raw;
+    return num;
+  }
+
+//-----------------------------------------------------------------
+
+void EEPROMWriteFloat(int addr, float num) {
+    byte raw[4];
+    (float&)raw = num;
+    for(byte i = 0; i < 4; i++) EEPROM.write(addr+i, raw[i]);
+  }  
+
+//-----------------------------------------------------------------
+
+void ReadEEPROMindex(){
+  eepromEndAddress = EEPROM.length() - 4;
+  eepromSaveAddress = EEPROMReadInt(EEPROM_INDEX_ADDRESS);
+   if (eepromSaveAddress < EEPROM_DATA_START_ADDRESS || eepromSaveAddress > eepromEndAddress) 
+    {eepromSaveAddress=EEPROM_DATA_START_ADDRESS; Current_mAperHourConsumed=0.0;} 
+    else
+    {Current_mAperHourConsumed = EEPROMReadFloat(eepromSaveAddress);
+    eepromSaveAddress+=4;
+    EEPROMWriteInt(EEPROM_INDEX_ADDRESS,eepromSaveAddress);
+    eepromSaveCounter=49;   }
+}
+
+
+//-----------------------------------------------------------------
+
+void DumpConsToEEPROM(){
+ if (!StatusLowBattMainLEDOn) {analogWrite(MAIN_LED_B,255);} else {analogWrite(MAIN_LED_B,LOW);}
+ if (eepromSaveCounter==0) {
+     eepromSaveAddress+=4;
+     if (eepromSaveAddress>eepromEndAddress) {eepromSaveAddress=EEPROM_DATA_START_ADDRESS;}
+      EEPROMWriteInt(EEPROM_INDEX_ADDRESS,eepromSaveAddress);
+    eepromSaveCounter=49;
+  } else eepromSaveCounter--;
+ EEPROMWriteFloat(eepromSaveAddress,Current_mAperHourConsumed);   
+if (!StatusLowBattMainLEDOn) {analogWrite(MAIN_LED_B,LOW);} else {analogWrite(MAIN_LED_B,255);}
+}
 
 //-----------------------------------------------------------------
 
@@ -515,6 +580,8 @@ bool ReadEEPROMConfig(){
   if (b!=35 && b2!=35 ) {
   //EEPROM is clear(new device) and setup variables to default values  
   ResetSystemConfig();
+  eepromSaveAddress = 32;
+  eepromSaveCounter=0;
   newc=true;
  }
   else {
@@ -534,6 +601,8 @@ bool ReadEEPROMConfig(){
    if (b==3) {RenderPPMInfo=true;} else {RenderPPMInfo=false;}
    b=EEPROM.read(12);
    if (b==3) {RenderCurrentInfo=true;} else {RenderCurrentInfo=false;}
+   unsigned int S;
+    if (CurrentSensorEnabled) {ReadEEPROMindex();}
    newc=false; 
   }
   return newc;
@@ -557,6 +626,9 @@ void WriteEEPROMConfig(){
   EEPROM.write(31,35);
 }
 
+//-----------------------------------------------------------------
+
+//-----------------------------------------------------------------
 
 // ================================================================
 // ===                     OTHER FUNCTIONS                      ===
@@ -677,11 +749,15 @@ void RenderMenuNavigation(){
 void RenderTelemetry(){
 
   if (SystemMode==SYSTEM_NORMAL) {
-    Serial.print("NORMAL ");}  
+  Serial.print("NORMAL ");
+  Serial.print(RXsignalRSSI);Serial.print(" "); 
+  }  
  
   //System states render
   if (RenderSystemStates) {
-  Serial.print("KSW: ");Serial.print(!EngineSTOP);Serial.print("/"); Serial.print(LastMaxMainSWPacketsCounter);Serial.print("/"); Serial.print(LastMainSWPacketsAverage);Serial.print("/"); Serial.print(MainSWPressCounter);
+  Serial.print("KSW: ");Serial.print(!EngineSTOP);Serial.print("/"); 
+                        Serial.print(LastMaxMainSWPacketsCounter);Serial.print("/"); 
+                        Serial.print(MainSWPressCounter);
   Serial.print(" | Serv/NoRX/LowBatt/Buzz: ");Serial.print(SystemServiceMode);Serial.print("/");
                                               Serial.print(SystemStatusNoRX);Serial.print("/");
                                               Serial.print(SystemStatusLowBatt);Serial.print("/");
@@ -690,16 +766,15 @@ void RenderTelemetry(){
 
   //Battery status render
   if (RenderBatteryInfo) {
-  Serial.print(" | Volt/Avg/Type: ");Serial.print(MainBattVoltage);Serial.print("/");Serial.print(MainBattVoltageAverage);Serial.print("/");RenderBType();
+  Serial.print(" | V/AvgV/Type: ");Serial.print(MainBattVoltage);Serial.print("/");Serial.print(MainBattVoltageAverage);Serial.print("/");RenderBType();
   }
 
   //RX info render
   if (RenderPPMInfo) {
   Serial.print(" | PPM Gen/Read/SW: ");Serial.print(ServoOutMS);Serial.print("/");Serial.print(MainSWTime);Serial.print("/");Serial.print(PPMSwitchLevel);}
 
-
   if (RenderCurrentInfo && CurrentSensorEnabled) {
-  Serial.print(" | C_Sens Mom/Max/Cons: ");Serial.print(Current_mA);Serial.print("/");Serial.print(Current_Max_mA);Serial.print("/");Serial.print(Current_mAperHourConsumed);
+  Serial.print(" | CSens mA/Max/Cons: ");Serial.print(Current_mA);Serial.print("/");Serial.print(Current_Max_mA);Serial.print("/");Serial.print(Current_mAperHourConsumed);
   }
   
   Serial.println("");
@@ -711,7 +786,6 @@ void RenderTelemetry(){
 // ================================================================
 // ===                           MENUS                          ===
 // ================================================================
-
 
 bool MenuInputHandler(){
  bool s;
@@ -970,16 +1044,10 @@ void CalibratingInput (const byte stage){
      delayMicroseconds(1000); 
    break;    
    case 2:   //Stage2 - reading UpperPosition data
-     CalibrationUpperLevel=MainSWTime;
-     delayMicroseconds(1000); 
-     CalibrationUpperLevel=MainSWTime;
-     delayMicroseconds(1000); 
-     CalibrationUpperLevel=MainSWTime;
-     delayMicroseconds(1000); 
-     CalibrationUpperLevel=MainSWTime;
-     delayMicroseconds(1000); 
-     CalibrationUpperLevel=MainSWTime;
-     delayMicroseconds(1000); 
+      for (i=0; i <= 7; i++){
+       CalibrationUpperLevel=MainSWTime;
+       delayMicroseconds(1000); 
+      }
    break;    
    case 3:   //Stage3 - play LowerPosition sound
      Serial.println("Move switch to Lower position"); 
@@ -992,16 +1060,10 @@ void CalibratingInput (const byte stage){
      delayMicroseconds(1000); 
    break;    
    case 4:   //Stage4 - reading LowerPosition data
-    CalibrationLowerLevel=MainSWTime;
-     delayMicroseconds(1000); 
-    CalibrationLowerLevel=MainSWTime;
-     delayMicroseconds(1000); 
-    CalibrationLowerLevel=MainSWTime;
-     delayMicroseconds(1000); 
-    CalibrationLowerLevel=MainSWTime;
-     delayMicroseconds(1000); 
-    CalibrationLowerLevel=MainSWTime;
-     delayMicroseconds(1000); 
+      for (i=0; i <= 7; i++){
+       CalibrationLowerLevel=MainSWTime;
+       delayMicroseconds(1000); 
+      }
    break;    
    case 5:   //Stage2 - Calculate levels
     CalibrationSwitchLevel = CalibrationLowerLevel + abs((CalibrationUpperLevel - CalibrationLowerLevel) / 2);
@@ -1028,12 +1090,13 @@ void CalibratingInput (const byte stage){
 // ================================================================
 
 void MainStateHandler(){
-
+unsigned long mil;
 //Engine STOP handling
 //in Normal operating mode Engine stop signal equal Switch position: lower pos = OFF, upper pos = ON
  if (SystemMode==SYSTEM_NORMAL){
-     LastEngineSTOP=EngineSTOP;
-     EngineSTOP=!SwitchPOS;}//Set EngineSTOP with Switch position Up=FALSE, Down=TRUE
+    //Set EngineSTOP with Switch position Up=FALSE, Down=TRUE
+     if (RXsignalRSSI>4) EngineSTOP=!SwitchPOS;
+     }
       
 if (!SystemStatusNoRX) {
  if (!EngineSTOP) { //if SwitchPOS in Upper position(ignition is ON) then setup output pin to HIGH one time!
@@ -1052,31 +1115,31 @@ if (!SystemStatusNoRX) {
        tone(BUZZER_PIN,200,30); 
        EngineSTOP_flag=false;}
  }
-} else {EngineSTOP=LastEngineSTOP;};
-
+}
+  mil = millis();
 //if Switch pressed(from Up to Down) then handling options  
-   if (millis()-MainSWPressLaststime<=BUZZER_SEARCHER_PERIOD && MainSWPressCounter>=1) 
+   if (mil-MainSWPressLaststime<=BUZZER_SEARCHER_PERIOD && MainSWPressCounter>=1) 
    { 
     switch (MainSWPressCounter) {
     case 3: 
-     if (millis() - MenuInitialTime <= MENU_INITIAL_PERIOD){
+     if (mil - MenuInitialTime <= MENU_INITIAL_PERIOD){
      //Switched 3 times within Initial period - GO TO Menu Mode!
        SystemMode=SYSTEM_MENU_M;} 
      else {SearchBuzzerActive=!SearchBuzzerActive;
            LED13Active=SearchBuzzerActive;                     //diagnostic LED13
            MainSWPressCounter=0;
            MainSWPressCounterChange=false;
-           MainSWPressLaststime=millis();}
+           MainSWPressLaststime=mil;}
           break; 
     case 1: 
      //start time for BUZZER_SEARCHER_PERIOD period
-     if (MainSWPressCounterChange) {MainSWPressLaststime=millis(); MainSWPressCounterChange=false;}     
+     if (MainSWPressCounterChange) {MainSWPressLaststime=mil; MainSWPressCounterChange=false;}     
       break;    
     } 
   }
 
  //reset Switch press counter if passed BEEPER_ACT_PERIOD time period   
- if (millis()-MainSWPressLaststime>BUZZER_SEARCHER_PERIOD) {MainSWPressCounter=0; MainSWPressLaststime=millis(); } 
+ if (mil-MainSWPressLaststime>BUZZER_SEARCHER_PERIOD) {MainSWPressCounter=0; MainSWPressLaststime=mil; } 
     
 //Flashings LEDs
 //Beeping search mode fashing 
@@ -1094,6 +1157,7 @@ if (!SystemStatusNoRX) {
        analogWrite(BUZZER_PIN,0);
        SearchBuzzerOn_flag=false; }}
    }
+ 
 
 //LED13 default fashing 
  if (LED13Active){
@@ -1122,8 +1186,8 @@ if (!SystemStatusNoRX) {
 //-----------------------------------------------------------------
 
 void MainTimerHandler(){
+ //unsigned long t1 = micros();
 //read input data from sensors
- readCurrentSensorData();
  readMainBattVoltage();
  
 //calc voltage sum for one more 250ms step
@@ -1143,32 +1207,35 @@ void MainTimerHandler(){
     {SystemStatusLowBatt = 2;}
  if (MainBattVoltageAverage > MainBattLowVoltageL1) {SystemStatusLowBatt=0;} 
 
-//Current Sensor processing
- //calc precize average current value for last 250ms
- Current_quartAverage_mA=(Current_quartAverage_mA+Current_mA) / 2;
+  readCurrentSensorData();
+   Current_quartAverage_mA=(Current_quartAverage_mA + Current_mA) / 2;
+   Current_mAperHourConsumed+=Current_quartAverage_mA / 14400; 
 
- if ( CurrentCalc_time == 0 ){
-   Current_mAperHourConsumed+=Current_quartAverage_mA/3600; 
-   Current_quartAverage_mA=0.0;
- } else CurrentCalc_time--;
+//processing RX signal quality
+ if ( MainSWPacketsCounter_time == 0 ){
+ if (LastMaxMainSWPacketsCounter<=20) {
+  SystemStatusNoRX=true;
+  RXsignalRSSI = 0;
+  } else {SystemStatusNoRX=false;}
+ if (LastMaxMainSWPacketsCounter>1 && LastMaxMainSWPacketsCounter<=10) 
+ {RXsignalRSSI = 1;}
+ if (LastMaxMainSWPacketsCounter>10 && LastMaxMainSWPacketsCounter<=20) 
+ {RXsignalRSSI = 2;}
+ if (LastMaxMainSWPacketsCounter>20 && LastMaxMainSWPacketsCounter<=30) 
+ {RXsignalRSSI = 3;}
+ if (LastMaxMainSWPacketsCounter>30 && LastMaxMainSWPacketsCounter<=40) 
+ {RXsignalRSSI = 4;}
+ if (LastMaxMainSWPacketsCounter>40) {RXsignalRSSI = 5;}
+  MainSWPacketsCounter_time=3;
+ } else MainSWPacketsCounter_time--;
 
-//RX PPM signal processing
- MainSWPacketsSum += MaxMainSWPacketsCounter;
 
-//reset packets counter after one second
- if (MainSWCounterReset_time==0) {
-  LastMaxMainSWPacketsCounter = MaxMainSWPacketsCounter;
-  LastMainSWPacketsAverage = MainSWPacketsAverage;
-  MainSWPacketsAverage = int(MainSWPacketsSum / 4);
-   if (MainSWPacketsAverage<=1) 
-   {SystemStatusNoRX=true;
-    EngineSTOP=LastEngineSTOP;
-   } else {SystemStatusNoRX=false;}   
-  MainSWPacketsSum = 0;
-  MaxMainSWPacketsCounter = 0;
-  MainSWCounterReset_time = 3;
-  } else MainSWCounterReset_time--;
-
+//dump consumed mA to EEPROM 
+ if (CurrentSensorEnabled) {
+ if (CurrentDump_time==0) {
+   DumpConsToEEPROM();
+   CurrentDump_time=39;
+  } else CurrentDump_time--;}
 
 //Render telemetry 
  if ( Render_time == 0 )
@@ -1177,7 +1244,6 @@ void MainTimerHandler(){
    else {RenderMenuNavigation();}
   Render_time=3;
   } else Render_time--;
-
 
 //Buzzer flashing
   if ( SearchBuzzer_time == 0 ){
@@ -1217,7 +1283,7 @@ void MainTimerHandler(){
    else StatusLowBattMainLEDOn = true;
   StatusLowBatt_time=1;
   } else StatusLowBatt_time--;
-
+//Serial.println(micros()-t1);
 }
 
 //-----------------------------------------------------------------
@@ -1272,7 +1338,8 @@ void FirstTimeRunInit(){
         WriteEEPROMConfig();
         } 
         else
-        {Serial.println("Use EEPROM Config. Set parameters");}
+        {Serial.println("Use EEPROM Config");}
+
 
 //Setup voltages
    readMainBattVoltage();
@@ -1283,17 +1350,12 @@ void FirstTimeRunInit(){
    MainSWPressCounter=0;
    MainBattVoltageSum=0.0;
    MainBattVoltageAverage_time=7;
-   MainSWPacketsSum = 0;
-   LastMaxMainSWPacketsCounter=0;
-   MainSWPacketsAverage = 0;  
+   MaxMainSWPacketsCounter=0;
 
 //Setup flags
    EngineSTOP_flag=false; 
    SearchBuzzerOn_flag=false;
 
-
-   
-/*
 //First MainSwitch reading   
    if (MainSWTime >= PPMSwitchLevel)
     {
@@ -1304,7 +1366,6 @@ void FirstTimeRunInit(){
      //Switch in Lower position
      SwitchPOS=false;
      SwitchPOS_fromUp=false;}
-*/
 
   PlayMenuSound(SOUND_KSW_INTRO);
   RenderCurrentConfig();
@@ -1312,6 +1373,7 @@ void FirstTimeRunInit(){
   //initial menu time readings
    MainSWPressLaststime=millis();  
    MenuInitialTime = millis();
+   CurrentLastMillis = millis();
 }
 //-----------------------------------------------------------------
 //-----------------------------------------------------------------

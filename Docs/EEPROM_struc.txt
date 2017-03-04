@@ -11,4 +11,6 @@ KillSwitchDuino EEPROM memory config structure:
 0010:  1 byte (bool) – Render Battery Info to Serial Port. If =3 then enabled, If =3 then disabled (default - 3)
 0011:  1 byte (bool) – Render RX Info to Serial Port. If =3 then enabled, If =3 then disabled (default - 3)
 0012:  1 byte (bool) – Render Current Sensor Info to Serial Port. If =3 then enabled, If =3 then disabled (default - 3)  (for future, v2.2)
+0029:  1 byte (int) –  Consumed current value(from main battery) address in EEPROM
 0031: 1 byte (byte) - tail header. If equal 35 (and start header equal 35) - use config from EEPROM, else use default values
+0032-0511: - Consumed current value save space
